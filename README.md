@@ -129,6 +129,67 @@ Example output:
 
 Relative telephony controls such as Phone Mute are exposed as `Triggered` events rather than fake Down/Up pairs.
 
+## Physical Collaboration Cover buttons
+
+For application code, prefer the physical-button API when you care about the
+actual controls printed on the cover rather than the descriptor-level HID
+names:
+
+```powershell
+slicectl watchbuttons
+```
+
+The CLI temporarily stops `HPSliceTelephonyService` while it owns the HP
+private key-event registration, then restores the service when monitoring
+stops.
+
+Example output:
+
+```text
+11:42:18.112  Pickup      COL01 IN  32 02 | COL01 IN  32 00
+11:42:19.540  Hangup      COL01 IN  32 00
+11:42:20.873  Mute        COL01 IN  32 00 | COL01 IN  32 10
+11:42:22.101  VolumeDown  COL02 IN  31 02
+11:42:23.447  VolumeUp    COL02 IN  31 01
+```
+
+Reusable API:
+
+```csharp
+SliceDevice slice = SliceDevice.Open();
+
+await slice.WatchPhysicalButtonsAsync(
+    ev =>
+    {
+        Console.WriteLine(ev.Button);
+    },
+    cancellationToken);
+```
+
+Known physical values are `Pickup`, `Hangup`, `Mute`, `VolumeUp`, and
+`VolumeDown`. The monitor combines the HP driver's private recognized-key
+event with the translated Collection 01/02 reports. This is specifically what
+allows a standalone `32 00` to be identified as the physical red Hangup
+button instead of treating every zero-state report as Hangup.
+
+## Private HP driver API
+
+The stock driver exposes the private device
+`\\.\HPSlicePDO_SYM_03F0`. SliceControl wraps it as a persistent,
+disposable session:
+
+```csharp
+using SlicePrivateDriver hp = slice.OpenPrivateDriver();
+
+hp.Hello();
+hp.SetVolume(50);
+hp.Goodbye();
+
+await hp.WaitForKeyPressAsync(cancellationToken);
+```
+
+The event registration and volume notification are stateful per open handle,
+so the same `SlicePrivateDriver` instance must be kept alive.
 
 ## Telephony state API
 
@@ -138,7 +199,7 @@ addition to the direct low-level `FE` LED protocol.
 Example:
 
 ```csharp
-using var slice = SliceDevice.Open();
+SliceDevice slice = SliceDevice.Open();
 
 slice.Telephony.EnterCall();
 slice.Telephony.ActiveDelayedExit();
