@@ -98,8 +98,9 @@ internal static class ShopAudioStatusService
                     float peak =
                         session.AudioMeterInformation.MasterPeakValue;
 
-                    if (peak <
-                        0.003f)
+                    if (session.SimpleAudioVolume.Mute ||
+                        peak <
+                            0.003f)
                     {
                         continue;
                     }
