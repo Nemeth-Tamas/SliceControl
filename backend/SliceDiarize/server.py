@@ -38,7 +38,7 @@ pipeline_lock = asyncio.Lock()
 
 app = FastAPI(
     title="SliceDiarize",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 
@@ -54,21 +54,11 @@ async def health():
         "model": MODEL_NAME,
         "device": str(device),
         "gpu": gpu_name,
+        "audio_loader": "pcm-wave-in-memory",
     }
 
 
-@app.post("/diarize")
-async def diarize(
-    file: UploadFile = File(...),
-):
-    data = await file.read()
-
-    if not data:
-        raise HTTPException(
-            status_code=400,
-            detail="Uploaded audio file is empty.",
-        )
-
+def decode_pcm_wave(data: bytes) -> dict:
     try:
         with wave.open(
             io.BytesIO(data),
@@ -79,6 +69,7 @@ async def diarize(
             sample_rate = wav.getframerate()
             frame_count = wav.getnframes()
             pcm = wav.readframes(frame_count)
+
     except wave.Error as exc:
         raise HTTPException(
             status_code=400,
@@ -117,16 +108,43 @@ async def diarize(
         .unsqueeze(0)
     )
 
-    audio_input = {
+    return {
         "waveform": waveform,
         "sample_rate": sample_rate,
     }
 
-    async with pipeline_lock:
-        output = await asyncio.to_thread(
-            pipeline,
-            audio_input,
+
+@app.post("/diarize")
+async def diarize(
+    file: UploadFile = File(...),
+):
+    data = await file.read()
+
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded audio file is empty.",
         )
+
+    audio_input = decode_pcm_wave(
+        data,
+    )
+
+    try:
+        async with pipeline_lock:
+            output = await asyncio.to_thread(
+                pipeline,
+                audio_input,
+            )
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"pyannote pipeline failed: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        ) from exc
 
     annotation = getattr(
         output,
@@ -141,18 +159,18 @@ async def diarize(
 
     for turn, speaker in annotation:
         segments.append(
-        {
+            {
                 "start": float(turn.start),
                 "end": float(turn.end),
                 "speaker": str(speaker),
-    }
-    )
+            }
+        )
 
     speakers = sorted(
         {
             segment["speaker"]
             for segment in segments
-    }
+        }
     )
 
     return {
@@ -160,4 +178,3 @@ async def diarize(
         "speakers": speakers,
         "speaker_count": len(speakers),
     }
-
