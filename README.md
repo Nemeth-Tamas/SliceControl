@@ -359,7 +359,11 @@ Ctrl+C        -> quit safely
 
 While recording, the panel enters the green active-call presentation. Pausing
 switches to the red/yellow muted presentation; resuming returns to green.
-Stopping uses the normal call exit state.
+SliceTranscribe now drives these visuals directly through the proprietary
+Collection 03 `FE` protocol instead of the stock Collection 01 telephony state
+machine. This avoids the driver's latched `42 01/00` mute-theme behavior that
+could make pause/resume appear visually inverted. Stopping uses the direct exit
+animation and reset.
 
 Recordings default to:
 
