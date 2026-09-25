@@ -628,13 +628,12 @@ static async Task RunButtonLoopAsync(
                 break;
 
             case SlicePhysicalButton.VolumeDown:
-                Console.WriteLine(
-                    "VolumeDown (reserved for app control)");
-                break;
-
             case SlicePhysicalButton.VolumeUp:
-                Console.WriteLine(
-                    "VolumeUp (reserved for app control)");
+                await ShowVolumeFeedbackAsync(
+                    slice,
+                    recorder,
+                    ev.Button,
+                    cancellationToken);
                 break;
 
             default:
@@ -643,6 +642,69 @@ static async Task RunButtonLoopAsync(
                 break;
         }
     }
+}
+
+static async Task ShowVolumeFeedbackAsync(
+    SliceDevice slice,
+    AudioRecorder recorder,
+    SlicePhysicalButton button,
+    CancellationToken cancellationToken)
+{
+    int volume = GetMasterPlaybackVolumePercent();
+
+    if (recorder.IsRecording)
+    {
+        if (recorder.IsPaused)
+        {
+            slice.Lights.SetMutedCall(volume);
+        }
+        else
+        {
+            slice.Lights.SetCall(volume);
+        }
+    }
+    else
+    {
+        slice.Lights.SetBar(volume);
+    }
+
+    Console.WriteLine(
+        $"{button}: Windows volume {volume}%");
+
+    await Task.Delay(
+        700,
+        cancellationToken);
+
+    if (recorder.IsRecording)
+    {
+        if (recorder.IsPaused)
+        {
+            slice.Lights.ShowActiveMutedCall();
+        }
+        else
+        {
+            slice.Lights.ShowActiveCall();
+        }
+    }
+    else
+    {
+        slice.Lights.Reset();
+    }
+}
+
+static int GetMasterPlaybackVolumePercent()
+{
+    using var enumerator =
+        new MMDeviceEnumerator();
+
+    using MMDevice endpoint =
+        enumerator.GetDefaultAudioEndpoint(
+            DataFlow.Render,
+            Role.Multimedia);
+
+    return (int)Math.Round(
+        endpoint.AudioEndpointVolume.MasterVolumeLevelScalar *
+        100.0f);
 }
 
 static async Task CommitTranscriptSegmentAsync(
