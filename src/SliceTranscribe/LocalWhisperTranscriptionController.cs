@@ -19,10 +19,19 @@ internal sealed class LocalWhisperTranscriptionController :
         TimeSpan.FromMilliseconds(500);
 
     private const string Prompt =
-        "Magyar nyelvű beszélgetés egy elektronikai, telefonjavító és informatikai üzletben. " +
-        "Gyakori szavak és nevek: Cellnet, Dunaújváros, iPhone, Android, Windows, Samsung, " +
-        "Xiaomi, USB, SSD, RAM, Wi-Fi. A számokat, árakat, típusjeleket és magyar ékezeteket " +
-        "pontosan írd le.";
+        "Cellnet, Dunaújváros, iPhone, Android, Windows, Samsung, Xiaomi, USB, SSD, RAM, Wi-Fi.";
+
+    private const int VadFrameMilliseconds =
+        20;
+
+    private const float VadRmsThreshold =
+        0.006f;
+
+    private const float VadPeakThreshold =
+        0.018f;
+
+    private const int VadMinimumSpeechFrames =
+        3;
 
     private readonly object _gate =
         new();
@@ -124,6 +133,9 @@ internal sealed class LocalWhisperTranscriptionController :
                     .CreateBuilder()
                     .WithLanguage("hu")
                     .WithPrompt(Prompt)
+                    .WithNoContext()
+                    .WithTemperature(0.0f)
+                    .WithNoSpeechThreshold(0.45f)
                     .Build();
 
             Channel<LocalCommand> commands =
@@ -472,38 +484,40 @@ internal sealed class LocalWhisperTranscriptionController :
         string transcriptPath,
         CancellationToken cancellationToken)
     {
-        using var rawStream =
-            new MemoryStream(
+        float[] monoSamples =
+            ResampleToMono16k(
                 sourceAudio,
-                writable: false);
-
-        using var rawSource =
-            new RawSourceWaveStream(
-                rawStream,
                 sourceFormat);
 
-        ISampleProvider samples =
-            rawSource.ToSampleProvider();
-
-        if (samples.WaveFormat.Channels >
-            1)
+        if (!ContainsSpeech(
+            monoSamples))
         {
-            samples =
-                new DownmixToMonoSampleProvider(
-                    samples);
+            return null;
         }
 
-        var resampler =
-            new WdlResamplingSampleProvider(
-                samples,
-                TargetSampleRate);
+        byte[] pcm16 =
+            ConvertToPcm16(
+                monoSamples);
+
+        using var pcmStream =
+            new MemoryStream(
+                pcm16,
+                writable: false);
+
+        using var pcmSource =
+            new RawSourceWaveStream(
+                pcmStream,
+                new WaveFormat(
+                    TargetSampleRate,
+                    16,
+                    1));
 
         using var wavStream =
             new MemoryStream();
 
         WaveFileWriter.WriteWavFileToStream(
             wavStream,
-            resampler.ToWaveProvider16());
+            pcmSource);
 
         wavStream.Position =
             0;
@@ -560,6 +574,200 @@ internal sealed class LocalWhisperTranscriptionController :
             $"LOCAL TEXT -> {transcript}");
 
         return transcript;
+    }
+
+    private static float[] ResampleToMono16k(
+        byte[] sourceAudio,
+        WaveFormat sourceFormat)
+    {
+        using var rawStream =
+            new MemoryStream(
+                sourceAudio,
+                writable: false);
+
+        using var rawSource =
+            new RawSourceWaveStream(
+                rawStream,
+                sourceFormat);
+
+        ISampleProvider samples =
+            rawSource.ToSampleProvider();
+
+        if (samples.WaveFormat.Channels >
+            1)
+        {
+            samples =
+                new DownmixToMonoSampleProvider(
+                    samples);
+        }
+
+        var resampler =
+            new WdlResamplingSampleProvider(
+                samples,
+                TargetSampleRate);
+
+        var output =
+            new List<float>(
+                Math.Max(
+                    TargetSampleRate,
+                    sourceAudio.Length /
+                    Math.Max(
+                        1,
+                        sourceFormat.BlockAlign)));
+
+        var buffer =
+            new float[4096];
+
+        while (true)
+        {
+            int read =
+                resampler.Read(
+                    buffer,
+                    0,
+                    buffer.Length);
+
+            if (read <= 0)
+            {
+                break;
+            }
+
+            for (int i = 0;
+                 i < read;
+                 i++)
+            {
+                output.Add(
+                    buffer[i]);
+            }
+        }
+
+        return output.ToArray();
+    }
+
+    private static bool ContainsSpeech(
+        float[] samples)
+    {
+        if (samples.Length == 0)
+        {
+            return false;
+        }
+
+        int frameSamples =
+            TargetSampleRate *
+            VadFrameMilliseconds /
+            1000;
+
+        int qualifyingFrames =
+            0;
+
+        for (int offset = 0;
+             offset < samples.Length;
+             offset += frameSamples)
+        {
+            int count =
+                Math.Min(
+                    frameSamples,
+                    samples.Length -
+                    offset);
+
+            double sumSquares =
+                0;
+
+            float peak =
+                0;
+
+            for (int i = 0;
+                 i < count;
+                 i++)
+            {
+                float sample =
+                    samples[
+                        offset +
+                        i];
+
+                float magnitude =
+                    Math.Abs(
+                        sample);
+
+                if (magnitude >
+                    peak)
+                {
+                    peak =
+                        magnitude;
+                }
+
+                sumSquares +=
+                    sample *
+                    sample;
+            }
+
+            float rms =
+                (float)Math.Sqrt(
+                    sumSquares /
+                    count);
+
+            if (rms >=
+                    VadRmsThreshold &&
+                peak >=
+                    VadPeakThreshold)
+            {
+                qualifyingFrames++;
+
+                if (qualifyingFrames >=
+                    VadMinimumSpeechFrames)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static byte[] ConvertToPcm16(
+        float[] samples)
+    {
+        byte[] pcm =
+            new byte[
+                samples.Length *
+                sizeof(short)];
+
+        for (int i = 0;
+             i < samples.Length;
+             i++)
+        {
+            float sample =
+                Math.Clamp(
+                    samples[i],
+                    -1.0f,
+                    1.0f);
+
+            short value =
+                sample >= 0
+                    ? (short)(
+                        sample *
+                        short.MaxValue)
+                    : (short)(
+                        sample *
+                        -short.MinValue);
+
+            int offset =
+                i *
+                sizeof(short);
+
+            pcm[offset] =
+                (byte)(
+                    value &
+                    0xFF);
+
+            pcm[
+                offset +
+                1] =
+                (byte)(
+                    (value >> 8) &
+                    0xFF);
+        }
+
+        return pcm;
     }
 
     private static async Task WriteTranscriptHeaderAsync(
