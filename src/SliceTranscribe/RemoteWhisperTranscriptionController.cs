@@ -339,7 +339,8 @@ internal sealed class RemoteWhisperTranscriptionController :
                         wavPath,
                         _baseUri.ToString(),
                         _diarizationServerUrl,
-                        cancellationToken);
+                        cancellationToken:
+                            cancellationToken);
 
                 if (!string.IsNullOrWhiteSpace(
                     refined))
