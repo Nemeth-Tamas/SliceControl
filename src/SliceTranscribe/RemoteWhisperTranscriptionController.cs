@@ -14,7 +14,7 @@ internal sealed class RemoteWhisperTranscriptionController :
         16000;
 
     private static readonly TimeSpan DefaultChunkDuration =
-        TimeSpan.FromSeconds(6);
+        TimeSpan.FromSeconds(12);
 
     private static readonly TimeSpan MinimumFlushDuration =
         TimeSpan.FromMilliseconds(500);
@@ -47,6 +47,7 @@ internal sealed class RemoteWhisperTranscriptionController :
     private readonly Uri _baseUri;
     private readonly Uri _inferenceUri;
     private readonly TimeSpan _chunkDuration;
+    private readonly int _selectedChannel;
 
     private readonly HttpClient _http =
         new()
@@ -69,10 +70,21 @@ internal sealed class RemoteWhisperTranscriptionController :
     public RemoteWhisperTranscriptionController(
         AudioRecorder recorder,
         string baseUrl,
+        int selectedChannel = 0,
         TimeSpan? chunkDuration = null)
     {
         _recorder =
             recorder;
+
+        _selectedChannel =
+            selectedChannel;
+
+        if (_selectedChannel < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(selectedChannel),
+                "Remote microphone channel must be zero or greater.");
+        }
 
         _chunkDuration =
             chunkDuration ??
@@ -122,6 +134,13 @@ internal sealed class RemoteWhisperTranscriptionController :
             captureFormat is WaveFormatExtensible extensible
                 ? extensible.ToStandardWaveFormat()
                 : captureFormat;
+
+        if (sourceFormat.Channels > 1 &&
+            _selectedChannel >= sourceFormat.Channels)
+        {
+            throw new InvalidOperationException(
+                $"Requested remote microphone channel {_selectedChannel}, but capture exposes only {sourceFormat.Channels} channels.");
+        }
 
         lock (_gate)
         {
@@ -193,7 +212,7 @@ internal sealed class RemoteWhisperTranscriptionController :
             }
 
             Console.WriteLine(
-                $"Remote Whisper ready: {_baseUri} / hu / {_chunkDuration.TotalSeconds:0.#} s chunks");
+                $"Remote Whisper ready: {_baseUri} / hu / channel {_selectedChannel} / {_chunkDuration.TotalSeconds:0.#} s chunks");
 
             return transcriptPath;
         }
@@ -646,7 +665,7 @@ internal sealed class RemoteWhisperTranscriptionController :
         }
     }
 
-    private static float[] ResampleToMono16k(
+    private float[] ResampleToMono16k(
         byte[] sourceAudio,
         WaveFormat sourceFormat)
     {
@@ -667,8 +686,9 @@ internal sealed class RemoteWhisperTranscriptionController :
             1)
         {
             samples =
-                new StrongestChannelSampleProvider(
-                    samples);
+                new FixedChannelSampleProvider(
+                    samples,
+                    _selectedChannel);
         }
 
         var resampler =
@@ -1108,19 +1128,18 @@ internal sealed class RemoteWhisperTranscriptionController :
         TaskCompletionSource<string?> Completion)
         : RemoteCommand;
 
-    private sealed class StrongestChannelSampleProvider :
+    private sealed class FixedChannelSampleProvider :
         ISampleProvider
     {
         private readonly ISampleProvider _source;
+        private readonly int _selectedChannel;
 
         private float[] _sourceBuffer =
             Array.Empty<float>();
 
-        private double[] _channelEnergy =
-            Array.Empty<double>();
-
-        public StrongestChannelSampleProvider(
-            ISampleProvider source)
+        public FixedChannelSampleProvider(
+            ISampleProvider source,
+            int selectedChannel)
         {
             if (source.WaveFormat.Channels <=
                 1)
@@ -1130,8 +1149,19 @@ internal sealed class RemoteWhisperTranscriptionController :
                     nameof(source));
             }
 
+            if (selectedChannel < 0 ||
+                selectedChannel >=
+                    source.WaveFormat.Channels)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(selectedChannel));
+            }
+
             _source =
                 source;
+
+            _selectedChannel =
+                selectedChannel;
 
             WaveFormat =
                 WaveFormat.CreateIeeeFloatWaveFormat(
@@ -1161,19 +1191,6 @@ internal sealed class RemoteWhisperTranscriptionController :
                         sourceSamplesNeeded];
             }
 
-            if (_channelEnergy.Length !=
-                channels)
-            {
-                _channelEnergy =
-                    new double[
-                        channels];
-            }
-            else
-            {
-                Array.Clear(
-                    _channelEnergy);
-            }
-
             int sourceSamplesRead =
                 _source.Read(
                     _sourceBuffer,
@@ -1188,52 +1205,13 @@ internal sealed class RemoteWhisperTranscriptionController :
                  frame < frames;
                  frame++)
             {
-                int sourceOffset =
-                    frame *
-                    channels;
-
-                for (int channel = 0;
-                     channel < channels;
-                     channel++)
-                {
-                    float sample =
-                        _sourceBuffer[
-                            sourceOffset +
-                            channel];
-
-                    _channelEnergy[channel] +=
-                        sample *
-                        sample;
-                }
-            }
-
-            int strongestChannel =
-                0;
-
-            for (int channel = 1;
-                 channel < channels;
-                 channel++)
-            {
-                if (_channelEnergy[channel] >
-                    _channelEnergy[
-                        strongestChannel])
-                {
-                    strongestChannel =
-                        channel;
-                }
-            }
-
-            for (int frame = 0;
-                 frame < frames;
-                 frame++)
-            {
                 buffer[
                     offset +
                     frame] =
                     _sourceBuffer[
                         frame *
                             channels +
-                        strongestChannel];
+                        _selectedChannel];
             }
 
             return frames;
