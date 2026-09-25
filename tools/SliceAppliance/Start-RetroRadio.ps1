@@ -1,6 +1,7 @@
 param(
     [string]$PrimaryStream = "https://icast.connectmedia.hu/5002/live.mp3",
-    [string]$BackupStream = "https://icast.connectmedia.hu/5001/live.mp3"
+    [string]$BackupStream = "https://icast.connectmedia.hu/5001/live.mp3",
+    [string]$RadioUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
