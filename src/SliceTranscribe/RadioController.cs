@@ -17,8 +17,6 @@ internal static class RadioController
         new(
             StringComparer.OrdinalIgnoreCase);
 
-    private static bool _paused;
-
     public static async Task<bool> RequestPauseAsync(
         string reason,
         CancellationToken cancellationToken = default)
@@ -31,26 +29,17 @@ internal static class RadioController
             PauseReasons.Add(
                 reason);
 
-            if (_paused)
-            {
-                return true;
-            }
-
-            bool sent =
-                await SendAsync(
-                    "pause",
+            bool paused =
+                await EnsurePausedAsync(
                     cancellationToken);
 
-            if (!sent)
+            if (!paused)
             {
                 PauseReasons.Remove(
                     reason);
 
                 return false;
             }
-
-            _paused =
-                true;
 
             Console.WriteLine(
                 $"RADIO -> paused ({string.Join(", ", PauseReasons)})");
@@ -75,30 +64,22 @@ internal static class RadioController
             PauseReasons.Remove(
                 reason);
 
-            if (!_paused ||
-                PauseReasons.Count != 0)
+            if (PauseReasons.Count != 0)
             {
                 return true;
             }
 
-            // VLC RC's pause command is a state toggle. Use it again to resume.
-            bool sent =
-                await SendAsync(
-                    "pause",
+            bool playing =
+                await EnsurePlayingAsync(
                     cancellationToken);
 
-            if (!sent)
+            if (playing)
             {
-                return false;
+                Console.WriteLine(
+                    "RADIO -> resumed");
             }
 
-            _paused =
-                false;
-
-            Console.WriteLine(
-                "RADIO -> resumed");
-
-            return true;
+            return playing;
         }
         finally
         {
@@ -106,7 +87,129 @@ internal static class RadioController
         }
     }
 
+    private static async Task<bool> EnsurePausedAsync(
+        CancellationToken cancellationToken)
+    {
+        bool? playing =
+            await QueryIsPlayingAsync(
+                cancellationToken);
+
+        if (playing == false)
+        {
+            return true;
+        }
+
+        if (playing is null)
+        {
+            Console.Error.WriteLine(
+                "RADIO -> could not determine VLC state before pausing");
+
+            return false;
+        }
+
+        if (!await SendAsync(
+            "pause",
+            cancellationToken))
+        {
+            return false;
+        }
+
+        await Task.Delay(
+            120,
+            cancellationToken);
+
+        return await QueryIsPlayingAsync(
+            cancellationToken) == false;
+    }
+
+    private static async Task<bool> EnsurePlayingAsync(
+        CancellationToken cancellationToken)
+    {
+        bool? playing =
+            await QueryIsPlayingAsync(
+                cancellationToken);
+
+        if (playing == true)
+        {
+            return true;
+        }
+
+        if (playing is null)
+        {
+            Console.Error.WriteLine(
+                "RADIO -> could not determine VLC state before resuming");
+
+            return false;
+        }
+
+        if (!await SendAsync(
+            "pause",
+            cancellationToken))
+        {
+            return false;
+        }
+
+        await Task.Delay(
+            120,
+            cancellationToken);
+
+        return await QueryIsPlayingAsync(
+            cancellationToken) == true;
+    }
+
+    private static async Task<bool?> QueryIsPlayingAsync(
+        CancellationToken cancellationToken)
+    {
+        string? response =
+            await SendAndReadAsync(
+                "is_playing",
+                cancellationToken);
+
+        if (response is null)
+        {
+            return null;
+        }
+
+        string[] lines =
+            response
+                .Split(
+                    new[] { '\r', '\n' },
+                    StringSplitOptions.RemoveEmptyEntries);
+
+        for (int i = lines.Length - 1;
+             i >= 0;
+             i--)
+        {
+            string line =
+                lines[i].Trim();
+
+            if (line == "1")
+            {
+                return true;
+            }
+
+            if (line == "0")
+            {
+                return false;
+            }
+        }
+
+        return null;
+    }
+
     private static async Task<bool> SendAsync(
+        string command,
+        CancellationToken cancellationToken)
+    {
+        string? response =
+            await SendAndReadAsync(
+                command,
+                cancellationToken);
+
+        return response is not null;
+    }
+
+    private static async Task<string?> SendAndReadAsync(
         string command,
         CancellationToken cancellationToken)
     {
@@ -134,7 +237,69 @@ internal static class RadioController
             await stream.FlushAsync(
                 cancellationToken);
 
-            return true;
+            using var timeout =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken);
+
+            timeout.CancelAfter(
+                TimeSpan.FromMilliseconds(350));
+
+            using var reader =
+                new StreamReader(
+                    stream,
+                    Encoding.ASCII,
+                    detectEncodingFromByteOrderMarks: false,
+                    bufferSize: 1024,
+                    leaveOpen: true);
+
+            var builder =
+                new StringBuilder();
+
+            char[] buffer =
+                new char[512];
+
+            try
+            {
+                while (true)
+                {
+                    int read =
+                        await reader.ReadAsync(
+                            buffer.AsMemory(
+                                0,
+                                buffer.Length),
+                            timeout.Token);
+
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    builder.Append(
+                        buffer,
+                        0,
+                        read);
+
+                    if (!stream.DataAvailable)
+                    {
+                        await Task.Delay(
+                            20,
+                            timeout.Token);
+
+                        if (!stream.DataAvailable)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+                when (!cancellationToken.IsCancellationRequested)
+            {
+                // VLC's RC interface keeps the TCP connection open. A short
+                // read timeout is expected after the command response.
+            }
+
+            return builder.ToString();
         }
         catch (
             Exception ex)
@@ -152,7 +317,7 @@ internal static class RadioController
             Console.Error.WriteLine(
                 $"Radio control unavailable: {ex.Message}");
 
-            return false;
+            return null;
         }
     }
 }
