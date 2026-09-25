@@ -335,7 +335,7 @@ internal sealed class RemoteWhisperTranscriptionController :
             try
             {
                 string? refined =
-                    await FinalTranscriptRefiner.RefineAsync(
+                    await WindowedConsensusRefiner.RefineAsync(
                         wavPath,
                         _baseUri.ToString(),
                         _diarizationServerUrl,
