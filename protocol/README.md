@@ -860,6 +860,21 @@ reports that accompany Pickup/Mute from being mislabeled as the red button.
 The implementation retains the matching raw reports as event evidence for
 debugging.
 
+Hardware validation of `slicectl watchbuttons` on the tested Slice produced
+the expected five-way mapping with the stock HP service temporarily stopped:
+
+```text
+Pickup      COL01 IN 32 02 | COL02 IN 31 00 | COL01 IN 32 00 | COL02 IN 31 00
+Hangup      COL01 IN 32 00 | COL02 IN 31 00
+Mute        COL01 IN 32 00 | COL02 IN 31 00 | COL01 IN 32 10 | COL02 IN 31 00
+VolumeDown  COL02 IN 31 02
+VolumeUp    COL02 IN 31 01
+```
+
+The CLI also restored `HPSliceTelephonyService` after monitoring ended. This
+confirms the current correlation timing and priority order for normal
+human-speed presses on the tested hardware.
+
 
 A controlled test removing the device-specific `LowerFilters` value and
 rebooting confirmed that `HPSliceTelephony` is integral to the exposed HID
@@ -965,7 +980,7 @@ Future work may include:
 - Further Collection 05 runtime capture work outside RDP.
 - Additional undocumented LED states.
 - Event-based application bindings.
-- Validation of physical-button correlation under intentionally rapid presses.
+- Stress-test physical-button correlation under intentionally rapid presses.
 - A Windows HID filter driver capable of intercepting selected controls
   before Windows consumes them.
 - A test-signed KMDF driver for full programmable-button ownership.
