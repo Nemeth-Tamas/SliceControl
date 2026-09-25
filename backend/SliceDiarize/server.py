@@ -5,7 +5,7 @@ import wave
 
 import numpy as np
 import torch
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pyannote.audio import Pipeline
 
 MODEL_NAME = os.environ.get(
@@ -117,6 +117,8 @@ def decode_pcm_wave(data: bytes) -> dict:
 @app.post("/diarize")
 async def diarize(
     file: UploadFile = File(...),
+    min_speakers: int = Form(2),
+    max_speakers: int = Form(4),
 ):
     data = await file.read()
 
@@ -124,6 +126,18 @@ async def diarize(
         raise HTTPException(
             status_code=400,
             detail="Uploaded audio file is empty.",
+        )
+
+    if min_speakers < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="min_speakers must be at least 1.",
+        )
+
+    if max_speakers < min_speakers:
+        raise HTTPException(
+            status_code=400,
+            detail="max_speakers must be greater than or equal to min_speakers.",
         )
 
     audio_input = decode_pcm_wave(
@@ -135,6 +149,8 @@ async def diarize(
             output = await asyncio.to_thread(
                 pipeline,
                 audio_input,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers,
             )
 
     except Exception as exc:
@@ -177,4 +193,6 @@ async def diarize(
         "segments": segments,
         "speakers": speakers,
         "speaker_count": len(speakers),
+        "min_speakers": min_speakers,
+        "max_speakers": max_speakers,
     }
