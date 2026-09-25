@@ -19,8 +19,7 @@ internal static class FinalTranscriptRefiner
         string wavPath,
         string whisperServerUrl,
         string? diarizationServerUrl,
-        int minSpeakers = 2,
-        int maxSpeakers = 4,
+        int expectedSpeakers = 2,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(
@@ -131,8 +130,7 @@ internal static class FinalTranscriptRefiner
                         http,
                         diarizationServerUrl,
                         monoWav,
-                        minSpeakers,
-                        maxSpeakers,
+                        expectedSpeakers,
                         cancellationToken);
 
                 Console.WriteLine(
@@ -312,9 +310,17 @@ internal static class FinalTranscriptRefiner
                         "no_speech_prob",
                         0.0);
 
-                double wordProbability =
-                    ReadAverageWordProbability(
+                IReadOnlyList<WhisperWord> words =
+                    ReadWords(
                         segment);
+
+                double wordProbability =
+                    words.Count > 0
+                        ? words.Average(
+                            word =>
+                                word.Probability)
+                        : ReadAverageWordProbability(
+                            segment);
 
                 segments.Add(
                     new WhisperSegment(
@@ -324,7 +330,8 @@ internal static class FinalTranscriptRefiner
                         text,
                         avgLogProb,
                         noSpeechProb,
-                        wordProbability));
+                        wordProbability,
+                        words));
             }
         }
 
@@ -344,26 +351,35 @@ internal static class FinalTranscriptRefiner
     private static ChannelTranscript SelectReferenceChannel(
         IReadOnlyList<ChannelTranscript> channels)
     {
-        int maxTextLength =
-            Math.Max(
-                1,
-                channels.Max(
+        double medianTextLength =
+            Median(
+                channels.Select(
                     channel =>
-                        channel.TextLength));
+                        (double)Math.Max(
+                            1,
+                            channel.TextLength)));
 
         return channels
             .OrderByDescending(
                 channel =>
                 {
-                    double coverage =
-                        (double)channel.TextLength /
-                        maxTextLength;
+                    double lengthRatio =
+                        Math.Max(
+                            0.05,
+                            channel.TextLength /
+                            Math.Max(
+                                1.0,
+                                medianTextLength));
+
+                    double lengthPenalty =
+                        0.12 *
+                        Math.Abs(
+                            Math.Log(
+                                lengthRatio));
 
                     return
-                        0.75 *
-                            channel.Score +
-                        0.25 *
-                            coverage;
+                        channel.Score -
+                        lengthPenalty;
                 })
             .First();
     }
@@ -510,7 +526,8 @@ internal static class FinalTranscriptRefiner
                     end,
                     selected.Text,
                     candidates.Count,
-                    selected.Channel));
+                    selected.Channel,
+                    selected.Words));
         }
 
         return CleanAndSortSegments(
@@ -689,8 +706,7 @@ internal static class FinalTranscriptRefiner
         HttpClient http,
         string serverUrl,
         byte[] wavBytes,
-        int minSpeakers,
-        int maxSpeakers,
+        int expectedSpeakers,
         CancellationToken cancellationToken)
     {
         Uri uri =
@@ -716,14 +732,8 @@ internal static class FinalTranscriptRefiner
 
         AddField(
             form,
-            "min_speakers",
-            minSpeakers.ToString(
-                CultureInfo.InvariantCulture));
-
-        AddField(
-            form,
-            "max_speakers",
-            maxSpeakers.ToString(
+            "num_speakers",
+            expectedSpeakers.ToString(
                 CultureInfo.InvariantCulture));
 
         using HttpResponseMessage response =
@@ -815,43 +825,64 @@ internal static class FinalTranscriptRefiner
         text.AppendLine(
             speakers is null
                 ? "# Diarization: unavailable"
-                : "# Diarization: pyannote");
+                : "# Diarization: pyannote / word-level alignment");
 
         text.AppendLine();
 
-        foreach (
-            FusedSegment segment
-            in segments)
+        if (speakers is not null)
         {
-            string? speaker =
-                speakers is null
-                    ? null
-                    : FindSpeaker(
-                        segment,
-                        speakers);
+            List<DiarizedLine> lines =
+                BuildDiarizedLines(
+                    segments,
+                    speakers);
 
-            text.Append(
-                '[');
-
-            text.Append(
-                FormatTimestamp(
-                    segment.Start));
-
-            text.Append(
-                "] ");
-
-            if (!string.IsNullOrWhiteSpace(
-                speaker))
+            foreach (
+                DiarizedLine line
+                in lines)
             {
                 text.Append(
-                    speaker);
+                    '[');
 
                 text.Append(
-                    ": ");
-            }
+                    FormatTimestamp(
+                        line.Start));
 
-            text.AppendLine(
-                segment.Text);
+                text.Append(
+                    "] ");
+
+                if (!string.IsNullOrWhiteSpace(
+                    line.Speaker))
+                {
+                    text.Append(
+                        line.Speaker);
+
+                    text.Append(
+                        ": ");
+                }
+
+                text.AppendLine(
+                    line.Text);
+            }
+        }
+        else
+        {
+            foreach (
+                FusedSegment segment
+                in segments)
+            {
+                text.Append(
+                    '[');
+
+                text.Append(
+                    FormatTimestamp(
+                        segment.Start));
+
+                text.Append(
+                    "] ");
+
+                text.AppendLine(
+                    segment.Text);
+            }
         }
 
         await File.WriteAllTextAsync(
@@ -862,8 +893,194 @@ internal static class FinalTranscriptRefiner
             cancellationToken);
     }
 
+    private static List<DiarizedLine> BuildDiarizedLines(
+        IReadOnlyList<FusedSegment> segments,
+        IReadOnlyList<SpeakerTurn> speakers)
+    {
+        var words =
+            new List<DiarizedWord>();
+
+        foreach (
+            FusedSegment segment
+            in segments
+                .OrderBy(
+                    item =>
+                        item.Start))
+        {
+            if (segment.Words.Count == 0)
+            {
+                string? speaker =
+                    FindSpeaker(
+                        segment.Start,
+                        segment.End,
+                        speakers);
+
+                words.Add(
+                    new DiarizedWord(
+                        segment.Start,
+                        segment.End,
+                        segment.Text,
+                        speaker));
+
+                continue;
+            }
+
+            foreach (
+                WhisperWord word
+                in segment.Words)
+            {
+                string cleaned =
+                    CleanWhitespace(
+                        word.Text);
+
+                if (cleaned.Length == 0)
+                {
+                    continue;
+                }
+
+                string? speaker =
+                    FindSpeaker(
+                        word.Start,
+                        word.End,
+                        speakers);
+
+                words.Add(
+                    new DiarizedWord(
+                        word.Start,
+                        word.End,
+                        cleaned,
+                        speaker));
+            }
+        }
+
+        words =
+            words
+                .OrderBy(
+                    word =>
+                        word.Start)
+                .ThenBy(
+                    word =>
+                        word.End)
+                .ToList();
+
+        var deduped =
+            new List<DiarizedWord>();
+
+        foreach (
+            DiarizedWord word
+            in words)
+        {
+            DiarizedWord? duplicate =
+                deduped
+                    .LastOrDefault(
+                        previous =>
+                            NormalizeText(
+                                previous.Text) ==
+                                NormalizeText(
+                                    word.Text) &&
+                            Math.Abs(
+                                previous.Start -
+                                word.Start) <=
+                                0.20);
+
+            if (duplicate is null)
+            {
+                deduped.Add(
+                    word);
+            }
+        }
+
+        var lines =
+            new List<DiarizedLine>();
+
+        foreach (
+            DiarizedWord word
+            in deduped)
+        {
+            if (lines.Count == 0)
+            {
+                lines.Add(
+                    new DiarizedLine(
+                        word.Start,
+                        word.End,
+                        word.Speaker,
+                        word.Text));
+
+                continue;
+            }
+
+            DiarizedLine previous =
+                lines[^1];
+
+            bool sameSpeaker =
+                string.Equals(
+                    previous.Speaker,
+                    word.Speaker,
+                    StringComparison.Ordinal);
+
+            bool closeEnough =
+                word.Start <=
+                    previous.End +
+                    1.25;
+
+            if (sameSpeaker &&
+                closeEnough)
+            {
+                lines[^1] =
+                    previous with
+                    {
+                        End =
+                            Math.Max(
+                                previous.End,
+                                word.End),
+                        Text =
+                            JoinTranscriptText(
+                                previous.Text,
+                                word.Text)
+                    };
+
+                continue;
+            }
+
+            lines.Add(
+                new DiarizedLine(
+                    word.Start,
+                    word.End,
+                    word.Speaker,
+                    word.Text));
+        }
+
+        return lines;
+    }
+
+    private static string JoinTranscriptText(
+        string left,
+        string right)
+    {
+        if (string.IsNullOrWhiteSpace(
+            left))
+        {
+            return right.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(
+            right))
+        {
+            return left.Trim();
+        }
+
+        return (
+            left.TrimEnd() +
+            " " +
+            right.TrimStart())
+            .Replace(
+                "  ",
+                " ");
+    }
+
     private static string? FindSpeaker(
-        FusedSegment segment,
+        double start,
+        double end,
         IReadOnlyList<SpeakerTurn> speakers)
     {
         SpeakerTurn? best =
@@ -880,10 +1097,10 @@ internal static class FinalTranscriptRefiner
                 Math.Max(
                     0,
                     Math.Min(
-                        segment.End,
+                        end,
                         turn.End) -
                     Math.Max(
-                        segment.Start,
+                        start,
                         turn.Start));
 
             if (overlap >
@@ -897,7 +1114,31 @@ internal static class FinalTranscriptRefiner
             }
         }
 
-        return best?.Speaker;
+        if (best is not null)
+        {
+            return best.Speaker;
+        }
+
+        double midpoint =
+            (start +
+             end) /
+            2.0;
+
+        return speakers
+            .OrderBy(
+                turn =>
+                {
+                    double turnMidpoint =
+                        (turn.Start +
+                         turn.End) /
+                        2.0;
+
+                    return Math.Abs(
+                        turnMidpoint -
+                        midpoint);
+                })
+            .FirstOrDefault()
+            ?.Speaker;
     }
 
     private static byte[] RenderChannelToMono16k(
@@ -939,6 +1180,71 @@ internal static class FinalTranscriptRefiner
             resampler.ToWaveProvider16());
 
         return output.ToArray();
+    }
+
+    private static IReadOnlyList<WhisperWord> ReadWords(
+        JsonElement segment)
+    {
+        var result =
+            new List<WhisperWord>();
+
+        if (!segment.TryGetProperty(
+                "words",
+                out JsonElement words) ||
+            words.ValueKind !=
+                JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (
+            JsonElement word
+            in words.EnumerateArray())
+        {
+            if (!word.TryGetProperty(
+                    "word",
+                    out JsonElement textElement))
+            {
+                continue;
+            }
+
+            string text =
+                textElement.GetString()
+                ?? string.Empty;
+
+            double start =
+                ReadDouble(
+                    word,
+                    "start",
+                    -1);
+
+            double end =
+                ReadDouble(
+                    word,
+                    "end",
+                    -1);
+
+            double probability =
+                ReadDouble(
+                    word,
+                    "probability",
+                    0.5);
+
+            if (start < 0 ||
+                end < start)
+            {
+                continue;
+            }
+
+            result.Add(
+                new WhisperWord(
+                    start,
+                    end,
+                    text,
+                    probability));
+        }
+
+        return result;
     }
 
     private static double ReadAverageWordProbability(
@@ -1357,14 +1663,34 @@ internal static class FinalTranscriptRefiner
         string Text,
         double AvgLogProb,
         double NoSpeechProbability,
-        double WordProbability);
+        double WordProbability,
+        IReadOnlyList<WhisperWord> Words);
+
+    private sealed record WhisperWord(
+        double Start,
+        double End,
+        string Text,
+        double Probability);
 
     private sealed record FusedSegment(
         double Start,
         double End,
         string Text,
         int Votes,
-        int SourceChannel);
+        int SourceChannel,
+        IReadOnlyList<WhisperWord> Words);
+
+    private sealed record DiarizedWord(
+        double Start,
+        double End,
+        string Text,
+        string? Speaker);
+
+    private sealed record DiarizedLine(
+        double Start,
+        double End,
+        string? Speaker,
+        string Text);
 
     private sealed record SpeakerTurn(
         double Start,
