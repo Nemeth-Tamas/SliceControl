@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$exe = Join-Path $repoRoot "src\SliceTranscribe\bin\Release\net8.0-windows\SliceTranscribe.exe"
+$exe = Join-Path $repoRoot "src\SliceTranscribe\bin\Release\net8.0-windows10.0.19041.0\SliceTranscribe.exe"
 
 if (-not (Test-Path $exe)) {
     throw "SliceTranscribe executable was not found at $exe"
