@@ -80,6 +80,10 @@ try
             await WatchAsync(slice);
             break;
 
+        case "watchbuttons":
+            await WatchPhysicalButtonsAsync(slice);
+            break;
+
         case "watchraw":
             await WatchRawAsync(slice);
             break;
@@ -162,6 +166,62 @@ static async Task WatchAsync(
                 $"{DateTime.Now:HH:mm:ss.fff}  {ev}");
         },
         cts.Token);
+}
+
+static async Task WatchPhysicalButtonsAsync(
+    SliceDevice slice)
+{
+    using var cts =
+        new CancellationTokenSource();
+
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        cts.Cancel();
+    };
+
+    bool restoreService =
+        HpTelephonyService.IsRunning();
+
+    if (restoreService)
+    {
+        Console.WriteLine(
+            "Temporarily stopping HPSliceTelephonyService for private key-event ownership...");
+
+        HpTelephonyService.StopAndWait();
+    }
+
+    try
+    {
+        Console.WriteLine(
+            "Watching physical Slice buttons. Press Ctrl+C to stop.");
+
+        await slice.WatchPhysicalButtonsAsync(
+            ev =>
+            {
+                string evidence =
+                    ev.Evidence.Count == 0
+                        ? "no HID evidence"
+                        : string.Join(
+                            " | ",
+                            ev.Evidence.Select(
+                                report => report.ToString()));
+
+                Console.WriteLine(
+                    $"{DateTime.Now:HH:mm:ss.fff}  {ev.Button,-10}  {evidence}");
+            },
+            cts.Token);
+    }
+    finally
+    {
+        if (restoreService)
+        {
+            Console.WriteLine(
+                "Restoring HPSliceTelephonyService...");
+
+            HpTelephonyService.StartAndWait();
+        }
+    }
 }
 
 static async Task WatchRawAsync(
@@ -298,6 +358,7 @@ Usage:
 
   slicectl sweep
   slicectl watch
+  slicectl watchbuttons
   slicectl watchraw
 
   slicectl raw FE 00 07 00 32 00 00 00
