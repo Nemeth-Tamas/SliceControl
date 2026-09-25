@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+TestResults/
+artifacts/
+
+*.zip
+*.7z
+
+.DS_Store
+Thumbs.db
