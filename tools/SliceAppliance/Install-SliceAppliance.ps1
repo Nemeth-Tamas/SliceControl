@@ -1,7 +1,8 @@
 param(
     [string]$Mic = "HP Bang & Olufsen Audio Module",
     [string]$WhisperUrl = "http://192.168.1.2:8765",
-    [string]$DiarizationUrl = "http://192.168.1.2:8766"
+    [string]$DiarizationUrl = "http://192.168.1.2:8766",
+    [switch]$NoStart
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,7 @@ $transcribeAction = New-ScheduledTaskAction -Execute $exe -Argument $transcribeA
 $radioAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $radioArgs -WorkingDirectory $PSScriptRoot
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$trigger.Delay = "PT5S"
 
 $transcribeSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $radioSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
@@ -44,7 +46,25 @@ Write-Host "Installed scheduled tasks:"
 Write-Host "  SliceTranscribe"
 Write-Host "  Slice Retro Radio"
 Write-Host
-Write-Host "They will start automatically at the next sign-in."
-Write-Host "Test them now with:"
-Write-Host '  Start-ScheduledTask -TaskName "SliceTranscribe"'
-Write-Host '  Start-ScheduledTask -TaskName "Slice Retro Radio"'
+if (-not $NoStart) {
+    Write-Host
+    Write-Host "Starting SliceTranscribe and Retro Radio now..."
+
+    Stop-ScheduledTask -TaskName "SliceTranscribe" -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName "Slice Retro Radio" -ErrorAction SilentlyContinue
+
+    Start-ScheduledTask -TaskName "SliceTranscribe"
+    Start-ScheduledTask -TaskName "Slice Retro Radio"
+
+    Start-Sleep -Seconds 2
+
+    $transcribeTask = Get-ScheduledTaskInfo -TaskName "SliceTranscribe"
+    $radioTask = Get-ScheduledTaskInfo -TaskName "Slice Retro Radio"
+
+    Write-Host ("  SliceTranscribe LastTaskResult: {0}" -f $transcribeTask.LastTaskResult)
+    Write-Host ("  Slice Retro Radio LastTaskResult: {0}" -f $radioTask.LastTaskResult)
+}
+
+Write-Host
+Write-Host "Both tasks will start automatically 5 seconds after each sign-in."
+Write-Host "Use -NoStart if you only want to install/update the tasks without starting them immediately."
