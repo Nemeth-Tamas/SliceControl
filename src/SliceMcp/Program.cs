@@ -1,3 +1,4 @@
+using SliceMcp;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
 using System.Net;
