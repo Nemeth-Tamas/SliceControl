@@ -95,7 +95,7 @@ internal static class FinalTranscriptRefiner
                 channelResults);
 
         Console.WriteLine(
-            $"CONSENSUS -> reference channel {reference.Channel}");
+            $"CONSENSUS -> reference channel {reference.Channel} / {reference.TextLength} chars / confidence {reference.Score:0.000}");
 
         List<FusedSegment> fused =
             Fuse(
@@ -360,36 +360,39 @@ internal static class FinalTranscriptRefiner
     private static ChannelTranscript SelectReferenceChannel(
         IReadOnlyList<ChannelTranscript> channels)
     {
-        double medianTextLength =
-            Median(
-                channels.Select(
-                    channel =>
-                        (double)Math.Max(
-                            1,
-                            channel.TextLength)));
+        double bestConfidence =
+            channels.Max(
+                channel =>
+                    channel.Score);
 
-        return channels
+        double confidenceFloor =
+            bestConfidence -
+            0.15;
+
+        ChannelTranscript[] eligible =
+            channels
+                .Where(
+                    channel =>
+                        channel.Score >=
+                            confidenceFloor)
+                .ToArray();
+
+        if (eligible.Length == 0)
+        {
+            return channels
+                .OrderByDescending(
+                    channel =>
+                        channel.Score)
+                .First();
+        }
+
+        return eligible
             .OrderByDescending(
                 channel =>
-                {
-                    double lengthRatio =
-                        Math.Max(
-                            0.05,
-                            channel.TextLength /
-                            Math.Max(
-                                1.0,
-                                medianTextLength));
-
-                    double lengthPenalty =
-                        0.12 *
-                        Math.Abs(
-                            Math.Log(
-                                lengthRatio));
-
-                    return
-                        channel.Score -
-                        lengthPenalty;
-                })
+                    channel.TextLength)
+            .ThenByDescending(
+                channel =>
+                    channel.Score)
             .First();
     }
 
