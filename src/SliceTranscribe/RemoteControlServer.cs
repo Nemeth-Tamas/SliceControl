@@ -32,6 +32,9 @@ internal sealed class RemoteControlServer :
 
     private readonly string _announcementDirectory;
 
+    private readonly AnnouncementRecorder _announcementRecorder =
+        new();
+
     private CancellationTokenSource? _announcementCts;
     private int _monitorCount;
     private bool _talkActive;
@@ -447,6 +450,20 @@ internal sealed class RemoteControlServer :
             if (path == "/api/record/start" &&
                 context.Request.HttpMethod == "POST")
             {
+                if (_announcementRecorder.IsRecording)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        409,
+                        new
+                        {
+                            error =
+                                "Stop the announcement recording first."
+                        });
+
+                    return;
+                }
+
                 string? file =
                     await _recording.StartAsync(
                         cancellationToken);
@@ -504,6 +521,114 @@ internal sealed class RemoteControlServer :
                 return;
             }
 
+            if (path == "/api/announce/record/start" &&
+                context.Request.HttpMethod == "POST")
+            {
+                if (
+                    _recording.IsRecording ||
+                    _announcementRecorder.IsRecording ||
+                    _announcementActive ||
+                    _talkActive)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        409,
+                        new
+                        {
+                            error =
+                                "Another recording, announcement, or talk session is active."
+                        });
+
+                    return;
+                }
+
+                string name =
+                    context.Request.QueryString["name"]
+                    ?? string.Empty;
+
+                string? microphone =
+                    context.Request.QueryString["mic"];
+
+                bool radioHeld =
+                    await RadioController.RequestPauseAsync(
+                        "announcement-recording",
+                        cancellationToken);
+
+                bool phoneHeld =
+                    await PhoneAudioSessionController.RequestMuteAsync(
+                        "announcement-recording",
+                        cancellationToken);
+
+                try
+                {
+                    string file =
+                        _announcementRecorder.Start(
+                            _announcementDirectory,
+                            name,
+                            microphone);
+
+                    RefreshIndicator();
+
+                    await WriteJsonAsync(
+                        context.Response,
+                        200,
+                        new
+                        {
+                            ok = true,
+                            file
+                        });
+                }
+                catch
+                {
+                    if (phoneHeld)
+                    {
+                        await PhoneAudioSessionController.ReleaseMuteAsync(
+                            "announcement-recording",
+                            CancellationToken.None);
+                    }
+
+                    if (radioHeld)
+                    {
+                        await RadioController.ReleasePauseAsync(
+                            "announcement-recording",
+                            CancellationToken.None);
+                    }
+
+                    throw;
+                }
+
+                return;
+            }
+
+            if (path == "/api/announce/record/stop" &&
+                context.Request.HttpMethod == "POST")
+            {
+                string? file =
+                    await _announcementRecorder.StopAsync(
+                        cancellationToken);
+
+                await PhoneAudioSessionController.ReleaseMuteAsync(
+                    "announcement-recording",
+                    CancellationToken.None);
+
+                await RadioController.ReleasePauseAsync(
+                    "announcement-recording",
+                    CancellationToken.None);
+
+                RefreshIndicator();
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    new
+                    {
+                        ok = true,
+                        file
+                    });
+
+                return;
+            }
+
             if (path == "/api/announce/play" &&
                 context.Request.HttpMethod == "POST")
             {
@@ -520,6 +645,20 @@ internal sealed class RemoteControlServer :
                         {
                             error =
                                 "Missing announcement name."
+                        });
+
+                    return;
+                }
+
+                if (_announcementRecorder.IsRecording)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        409,
+                        new
+                        {
+                            error =
+                                "Stop the announcement recording first."
                         });
 
                     return;
@@ -614,6 +753,9 @@ internal sealed class RemoteControlServer :
 
             announcement =
                 _announcementActive,
+
+            announcementRecording =
+                _announcementRecorder.IsRecording,
 
             microphones =
                 GetMicrophones(),
@@ -1229,7 +1371,8 @@ internal sealed class RemoteControlServer :
                 Volatile.Read(
                     ref _monitorCount) > 0 ||
                 _talkActive ||
-                _announcementActive)
+                _announcementActive ||
+                _announcementRecorder.IsRecording)
             {
                 _slice.Lights.ShowActiveCall();
             }
@@ -1527,6 +1670,18 @@ internal sealed class RemoteControlServer :
         {
         }
 
+        try
+        {
+            _announcementRecorder
+                .DisposeAsync()
+                .AsTask()
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch
+        {
+        }
+
         _speakerGate.Dispose();
 
         return ValueTask.CompletedTask;
@@ -1587,8 +1742,14 @@ button.danger{background:#652d2d}
 
 <div class="card">
 <h2>Announcements</h2>
-<div id="announcements"></div>
-<button class="danger" onclick="post('/api/announce/stop')">Stop announcement</button>
+<div class="row">
+<input id="announcementName" placeholder="Message name" style="flex:1">
+<button id="announcementRecord" onclick="startAnnouncementRecording()">Record new</button>
+<button class="danger" onclick="stopAnnouncementRecording()">Stop &amp; save</button>
+</div>
+<div class="small">Records from the selected Slice microphone above. Radio and phone audio are ducked while recording.</div>
+<div id="announcements" style="margin-top:10px"></div>
+<button class="danger" onclick="post('/api/announce/stop')">Stop announcement playback</button>
 </div>
 </main>
 
@@ -1624,7 +1785,8 @@ async function refresh(){
       'Quiet mode: '+(s.quiet?'ON':'OFF')+'\n'+
       'Remote listeners: '+s.monitoring+'\n'+
       'Talk: '+(s.talking?'ON':'OFF')+'\n'+
-      'Announcement: '+(s.announcement?'PLAYING':'OFF');
+      'Announcement: '+(s.announcement?'PLAYING':'OFF')+'\n'+
+      'Announcement recording: '+(s.announcementRecording?'ON':'OFF');
 
     const m=JSON.stringify(s.microphones||[]);
     if(m!==lastMics){
@@ -1641,6 +1803,12 @@ async function refresh(){
 
     const box=document.getElementById('announcements');
     box.innerHTML='';
+    if(!(s.announcements||[]).length){
+      const empty=document.createElement('div');
+      empty.className='small';
+      empty.textContent='No saved announcements yet.';
+      box.appendChild(empty);
+    }
     for(const name of s.announcements||[]){
       const b=document.createElement('button');
       b.textContent=name.replace(/\.(wav|mp3)$/i,'');
@@ -1653,6 +1821,23 @@ async function refresh(){
 }
 setInterval(refresh,1500);
 refresh();
+
+async function startAnnouncementRecording(){
+  try{
+    const name=document.getElementById('announcementName').value.trim();
+    const mic=document.getElementById('mic').value;
+    await api('/api/announce/record/start?name='+encodeURIComponent(name)+'&mic='+encodeURIComponent(mic),{method:'POST'});
+    document.getElementById('announcementRecord').classList.add('on');
+    await refresh();
+  }catch(e){ alert(e.message); }
+}
+async function stopAnnouncementRecording(){
+  try{
+    await api('/api/announce/record/stop',{method:'POST'});
+    document.getElementById('announcementRecord').classList.remove('on');
+    await refresh();
+  }catch(e){ alert(e.message); }
+}
 
 async function toggleListen(){
   if(monitorSocket){ stopListen(); return; }
