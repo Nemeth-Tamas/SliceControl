@@ -29,17 +29,12 @@ No external NuGet packages are currently required.
 
 ## Build
 
-Install the .NET 8 SDK.
+Install the .NET 8 SDK or newer.
 
 From the repository root:
 
 ```powershell
-dotnet new sln -n SliceControl
-
-dotnet sln SliceControl.sln add .\src\SliceControl\SliceControl.csproj
-dotnet sln SliceControl.sln add .\src\SliceCtl\SliceCtl.csproj
-
-dotnet build
+dotnet build SliceControl.slnx
 ```
 
 Release build:
@@ -54,7 +49,7 @@ dotnet publish .\src\SliceCtl\SliceCtl.csproj -c Release -r win-x64 --self-conta
 slicectl devices
 ```
 
-The program discovers the Slice dynamically by:
+The program discovers the Slice dynamically by VID/PID and collection:
 
 ```text
 VID_03F0
@@ -63,6 +58,7 @@ COL01
 COL02
 COL03
 COL04
+COL05
 ```
 
 No machine-specific HID path is hardcoded.
@@ -126,11 +122,26 @@ slicectl watch
 Example output:
 
 ```text
-21:10:44.381  VolumeDown Down [report=0x31, value=0x02]
-21:10:44.497  VolumeDown Up [report=0x31, value=0x00]
-21:10:47.114  PhoneMute Down [report=0x32, value=0x10]
-21:10:47.275  PhoneMute Up [report=0x32, value=0x00]
+09:34:49.541  VolumeDown Down [report=0x31, value=0x02]
+09:34:49.692  VolumeDown Up [report=0x31, value=0x00]
+09:35:46.877  PhoneMute Triggered [report=0x32, value=0x10]
 ```
+
+Relative telephony controls such as Phone Mute are exposed as `Triggered` events rather than fake Down/Up pairs.
+
+## Raw input monitor
+
+```powershell
+slicectl watchraw
+```
+
+This prints raw reports from known input collections. Current raw monitoring covers:
+
+- Collection 01 - Telephony
+- Collection 02 - Consumer Control
+- Collection 05 - Keyboard, when present
+
+This is intended for reverse engineering and for validating the interpreted button API.
 
 ## Raw reverse-engineering access
 
@@ -170,8 +181,4 @@ Stopping/starting the service normally requires an elevated terminal.
 
 This is an experimental reverse-engineering project.
 
-See:
-
-`protocol/README.md`
-
-for confirmed HID reports and LED behavior.
+See `protocol/README.md` for confirmed HID reports, observed LED behavior, and protocol notes.
