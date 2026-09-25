@@ -47,6 +47,31 @@ try
             "phone must be 'list' or 'connect'.");
     }
 
+    if (command == "calls")
+    {
+        string callsCommand =
+            args.Length >= 2
+                ? args[1].ToLowerInvariant()
+                : "help";
+
+        return callsCommand switch
+        {
+            "mute" =>
+                PhoneLinkController.TryToggleMute()
+                    ? 0
+                    : 1,
+
+            "hangup" =>
+                PhoneLinkController.TryHangUp()
+                    ? 0
+                    : 1,
+
+            _ =>
+                throw new ArgumentException(
+                    "calls must be 'mute' or 'hangup'.")
+        };
+    }
+
     if (command == "media")
     {
         string mediaCommand =
@@ -986,6 +1011,8 @@ Usage:
   SliceTranscribe phone connect
   SliceTranscribe phone connect --name "device name"
   SliceTranscribe media list
+  SliceTranscribe calls mute
+  SliceTranscribe calls hangup
 
 Default transcription backend:
 
