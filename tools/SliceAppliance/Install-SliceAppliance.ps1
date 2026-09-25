@@ -23,6 +23,9 @@ $loopbackPrefix = "http://127.0.0.1:{0}/" -f $remotePort
 $remoteRuleName = "Slice Remote Control - WireGuard"
 $mcpRuleName = "Slice MCP - WireGuard"
 
+$legacyTokenPath = Join-Path $env:LOCALAPPDATA "SliceAppliance\remote-token.txt"
+Remove-Item $legacyTokenPath -Force -ErrorAction SilentlyContinue
+
 Stop-ScheduledTask -TaskName "SliceTranscribe" -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName "Slice MCP" -ErrorAction SilentlyContinue
 
