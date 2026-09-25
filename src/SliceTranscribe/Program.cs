@@ -367,6 +367,10 @@ try
     var audioActivity =
         new AudioActivityMonitor();
 
+    var callProfile =
+        new CallProfileMonitor(
+            phoneAudio);
+
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -395,6 +399,9 @@ try
     Task? audioActivityTask =
         null;
 
+    Task? callProfileTask =
+        null;
+
     try
     {
         if (restoreHpService)
@@ -418,8 +425,12 @@ try
             audioActivity.RunAsync(
                 cts.Token);
 
+        callProfileTask =
+            callProfile.RunAsync(
+                cts.Token);
+
         Console.WriteLine(
-            "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
+            "Audio priority: active iPhone A2DP media mutes Retro Radio; HFP calls release A2DP ownership");
 
         Console.WriteLine(
             phoneName is null
@@ -604,6 +615,22 @@ try
             {
                 Console.Error.WriteLine(
                     $"Audio activity monitor stopped with an error: {ex.Message}");
+            }
+        }
+
+        if (callProfileTask is not null)
+        {
+            try
+            {
+                await callProfileTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Call profile monitor stopped with an error: {ex.Message}");
             }
         }
 
