@@ -4,6 +4,41 @@ namespace SliceTranscribe;
 
 internal static class SystemAudioController
 {
+    public static int VolumePercent
+    {
+        get
+        {
+            using MMDevice device =
+                GetDefaultRenderDevice();
+
+            return (int)Math.Round(
+                device.AudioEndpointVolume.MasterVolumeLevelScalar *
+                100.0f);
+        }
+    }
+
+    public static string DefaultOutputName
+    {
+        get
+        {
+            using MMDevice device =
+                GetDefaultRenderDevice();
+
+            return device.FriendlyName;
+        }
+    }
+
+    public static float MasterPeak
+    {
+        get
+        {
+            using MMDevice device =
+                GetDefaultRenderDevice();
+
+            return device.AudioMeterInformation.MasterPeakValue;
+        }
+    }
+
     public static bool IsMuted
     {
         get
@@ -37,6 +72,33 @@ internal static class SystemAudioController
 
         device.AudioEndpointVolume.Mute =
             muted;
+    }
+
+    public static int SetVolumePercent(
+        int percent)
+    {
+        int clamped =
+            Math.Clamp(
+                percent,
+                0,
+                100);
+
+        using MMDevice device =
+            GetDefaultRenderDevice();
+
+        device.AudioEndpointVolume.MasterVolumeLevelScalar =
+            clamped /
+            100.0f;
+
+        return clamped;
+    }
+
+    public static int AdjustVolumePercent(
+        int delta)
+    {
+        return SetVolumePercent(
+            VolumePercent +
+            delta);
     }
 
     private static MMDevice GetDefaultRenderDevice()
