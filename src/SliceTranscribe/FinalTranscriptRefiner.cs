@@ -86,15 +86,12 @@ internal static class FinalTranscriptRefiner
                 result);
 
             Console.WriteLine(
-                $"FINAL PASS <- channel {channel}: {result.Segments.Count} segments, score {result.Score:0.000}");
+                $"FINAL PASS <- channel {channel}: {result.Segments.Count} segments, {result.TextLength} chars, confidence {result.Score:0.000}");
         }
 
         ChannelTranscript reference =
-            channelResults
-                .OrderByDescending(
-                    result =>
-                        result.Score)
-                .First();
+            SelectReferenceChannel(
+                channelResults);
 
         Console.WriteLine(
             $"CONSENSUS -> reference channel {reference.Channel}");
@@ -334,7 +331,37 @@ internal static class FinalTranscriptRefiner
         return new ChannelTranscript(
             channel,
             segments,
-            score);
+            score,
+            segments.Sum(
+                segment =>
+                    segment.Text.Length));
+    }
+
+    private static ChannelTranscript SelectReferenceChannel(
+        IReadOnlyList<ChannelTranscript> channels)
+    {
+        int maxTextLength =
+            Math.Max(
+                1,
+                channels.Max(
+                    channel =>
+                        channel.TextLength));
+
+        return channels
+            .OrderByDescending(
+                channel =>
+                {
+                    double coverage =
+                        (double)channel.TextLength /
+                        maxTextLength;
+
+                    return
+                        0.75 *
+                            channel.Score +
+                        0.25 *
+                            coverage;
+                })
+            .First();
     }
 
     private static double ScoreChannel(
@@ -428,15 +455,23 @@ internal static class FinalTranscriptRefiner
                                     Iou =
                                         TimeIntersectionOverUnion(
                                             anchor,
+                                            segment),
+                                    ShorterOverlap =
+                                        TimeOverlapOnShorter(
+                                            anchor,
                                             segment)
                                 })
                         .Where(
                             item =>
                                 item.Iou >=
-                                0.35)
+                                    0.25 ||
+                                item.ShorterOverlap >=
+                                    0.55)
                         .OrderByDescending(
                             item =>
-                                item.Iou)
+                                Math.Max(
+                                    item.Iou,
+                                    item.ShorterOverlap))
                         .Select(
                             item =>
                                 item.Segment)
@@ -911,6 +946,35 @@ internal static class FinalTranscriptRefiner
             : fallback;
     }
 
+    private static double TimeOverlapOnShorter(
+        WhisperSegment left,
+        WhisperSegment right)
+    {
+        double intersection =
+            Math.Max(
+                0,
+                Math.Min(
+                    left.End,
+                    right.End) -
+                Math.Max(
+                    left.Start,
+                    right.Start));
+
+        double shorter =
+            Math.Min(
+                Math.Max(
+                    0.001,
+                    left.End -
+                    left.Start),
+                Math.Max(
+                    0.001,
+                    right.End -
+                    right.Start));
+
+        return intersection /
+            shorter;
+    }
+
     private static double TimeIntersectionOverUnion(
         WhisperSegment left,
         WhisperSegment right)
@@ -1231,7 +1295,8 @@ internal static class FinalTranscriptRefiner
     private sealed record ChannelTranscript(
         int Channel,
         IReadOnlyList<WhisperSegment> Segments,
-        double Score);
+        double Score,
+        int TextLength);
 
     private sealed record WhisperSegment(
         int Channel,
