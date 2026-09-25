@@ -51,6 +51,46 @@ try
         return 0;
     }
 
+    if (command == "finalize")
+    {
+        if (args.Length < 2)
+        {
+            throw new ArgumentException(
+                "finalize requires a WAV path.");
+        }
+
+        string finalizeWhisperServer =
+            ReadOption(
+                args,
+                "--remote-url")
+            ?? "http://192.168.1.2:8765";
+
+        string? finalizeDiarizationServer =
+            HasFlag(
+                args,
+                "--no-diarization")
+                ? null
+                : ReadOption(
+                    args,
+                    "--diarization-url")
+                  ?? "http://192.168.1.2:8766";
+
+        string? finalPath =
+            await FinalTranscriptRefiner.RefineAsync(
+                args[1],
+                finalizeWhisperServer,
+                finalizeDiarizationServer);
+
+        if (!string.IsNullOrWhiteSpace(
+            finalPath))
+        {
+            Console.WriteLine(
+                $"FINAL TRANSCRIPT -> {finalPath}");
+        }
+
+        return 0;
+    }
+
     if (command is not "run")
     {
         PrintHelp();
@@ -682,6 +722,8 @@ Usage:
   SliceTranscribe model --model "C:\path\ggml-base.bin"
   SliceTranscribe probechannels "C:\path\recording.wav"
   SliceTranscribe probechannels "C:\path\recording.wav" --remote-url "http://192.168.1.2:8765"
+  SliceTranscribe finalize "C:\path\recording.wav"
+  SliceTranscribe finalize "C:\path\recording.wav" --no-diarization
   SliceTranscribe mics
 
 Default transcription backend:
