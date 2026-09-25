@@ -48,6 +48,7 @@ internal sealed class RemoteWhisperTranscriptionController :
     private readonly Uri _inferenceUri;
     private readonly TimeSpan _chunkDuration;
     private readonly int _selectedChannel;
+    private readonly string? _diarizationServerUrl;
 
     private readonly HttpClient _http =
         new()
@@ -63,6 +64,7 @@ internal sealed class RemoteWhisperTranscriptionController :
     private Task? _workerTask;
 
     private string? _transcriptPath;
+    private string? _wavPath;
 
     private bool _starting;
     private bool _disposed;
@@ -71,6 +73,7 @@ internal sealed class RemoteWhisperTranscriptionController :
         AudioRecorder recorder,
         string baseUrl,
         int selectedChannel = 0,
+        string? diarizationServerUrl = null,
         TimeSpan? chunkDuration = null)
     {
         _recorder =
@@ -78,6 +81,12 @@ internal sealed class RemoteWhisperTranscriptionController :
 
         _selectedChannel =
             selectedChannel;
+
+        _diarizationServerUrl =
+            string.IsNullOrWhiteSpace(
+                diarizationServerUrl)
+                ? null
+                : diarizationServerUrl;
 
         if (_selectedChannel < 0)
         {
@@ -192,6 +201,9 @@ internal sealed class RemoteWhisperTranscriptionController :
                 _transcriptPath =
                     transcriptPath;
 
+                _wavPath =
+                    wavPath;
+
                 _commands =
                     commands;
 
@@ -268,6 +280,7 @@ internal sealed class RemoteWhisperTranscriptionController :
         Channel<RemoteCommand>? commands;
         Task? workerTask;
         string? transcriptPath;
+        string? wavPath;
 
         lock (_gate)
         {
@@ -279,6 +292,9 @@ internal sealed class RemoteWhisperTranscriptionController :
 
             transcriptPath =
                 _transcriptPath;
+
+            wavPath =
+                _wavPath;
         }
 
         if (commands is null)
@@ -310,6 +326,34 @@ internal sealed class RemoteWhisperTranscriptionController :
             else
             {
                 await CleanupSessionAsync();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(
+            wavPath))
+        {
+            try
+            {
+                string? refined =
+                    await FinalTranscriptRefiner.RefineAsync(
+                        wavPath,
+                        _baseUri.ToString(),
+                        _diarizationServerUrl,
+                        cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(
+                    refined))
+                {
+                    return refined;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Final multi-channel refinement failed: {ex.Message}");
+
+                Console.Error.WriteLine(
+                    "Keeping the live transcript instead.");
             }
         }
 
