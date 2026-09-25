@@ -201,6 +201,262 @@ internal sealed class RemoteControlServer :
                 return;
             }
 
+            if (path == "/api/audio/status" &&
+                context.Request.HttpMethod == "GET")
+            {
+                ShopAudioStatus audioStatus =
+                    await ShopAudioStatusService.CaptureAsync(
+                        cancellationToken);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    audioStatus);
+
+                return;
+            }
+
+            if (path == "/api/audio/volume" &&
+                context.Request.HttpMethod == "POST")
+            {
+                if (!int.TryParse(
+                    context.Request.QueryString["value"],
+                    out int value))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        400,
+                        new
+                        {
+                            error =
+                                "Missing or invalid volume value."
+                        });
+
+                    return;
+                }
+
+                int applied =
+                    SystemAudioController.SetVolumePercent(
+                        value);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    new
+                    {
+                        volume =
+                            applied
+                    });
+
+                return;
+            }
+
+            if (path == "/api/audio/adjust" &&
+                context.Request.HttpMethod == "POST")
+            {
+                if (!int.TryParse(
+                    context.Request.QueryString["delta"],
+                    out int delta))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        400,
+                        new
+                        {
+                            error =
+                                "Missing or invalid volume delta."
+                        });
+
+                    return;
+                }
+
+                int applied =
+                    SystemAudioController.AdjustVolumePercent(
+                        delta);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    new
+                    {
+                        volume =
+                            applied
+                    });
+
+                return;
+            }
+
+            if (path == "/api/audio/mute" &&
+                context.Request.HttpMethod == "POST")
+            {
+                if (!bool.TryParse(
+                    context.Request.QueryString["value"],
+                    out bool muted))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        400,
+                        new
+                        {
+                            error =
+                                "Missing or invalid mute value."
+                        });
+
+                    return;
+                }
+
+                SystemAudioController.SetMuted(
+                    muted);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    new
+                    {
+                        muted
+                    });
+
+                return;
+            }
+
+            if (path == "/api/audio/presets" &&
+                context.Request.HttpMethod == "GET")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    AudioPresetController.List());
+
+                return;
+            }
+
+            if (path == "/api/audio/preset" &&
+                context.Request.HttpMethod == "POST")
+            {
+                string? name =
+                    context.Request.QueryString["name"];
+
+                if (string.IsNullOrWhiteSpace(
+                    name))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        400,
+                        new
+                        {
+                            error =
+                                "Missing audio preset name."
+                        });
+
+                    return;
+                }
+
+                AudioPreset preset =
+                    await AudioPresetController.ActivateAsync(
+                        name,
+                        cancellationToken);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    preset);
+
+                return;
+            }
+
+            if (path == "/api/radio/presets" &&
+                context.Request.HttpMethod == "GET")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    RadioController.ListPresets());
+
+                return;
+            }
+
+            if (path == "/api/radio/play" &&
+                context.Request.HttpMethod == "POST")
+            {
+                string? value =
+                    context.Request.QueryString["value"];
+
+                if (string.IsNullOrWhiteSpace(
+                    value))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        400,
+                        new
+                        {
+                            error =
+                                "Missing radio preset or URL."
+                        });
+
+                    return;
+                }
+
+                string url =
+                    await RadioController.PlayAsync(
+                        value,
+                        cancellationToken);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    new
+                    {
+                        playing =
+                            value,
+                        url
+                    });
+
+                return;
+            }
+
+            if (path == "/api/radio/stop" &&
+                context.Request.HttpMethod == "POST")
+            {
+                bool stopped =
+                    await RadioController.StopAsync(
+                        cancellationToken);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    stopped
+                        ? 200
+                        : 503,
+                    new
+                    {
+                        stopped
+                    });
+
+                return;
+            }
+
+            if (path == "/api/radio/now-playing" &&
+                context.Request.HttpMethod == "GET")
+            {
+                string nowPlaying =
+                    await RadioController.GetNowPlayingAsync(
+                        cancellationToken);
+
+                string state =
+                    await RadioController.GetPlaybackStateAsync(
+                        cancellationToken);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    new
+                    {
+                        state,
+                        nowPlaying
+                    });
+
+                return;
+            }
+
             if (path == "/api/record/start" &&
                 context.Request.HttpMethod == "POST")
             {
