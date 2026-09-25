@@ -133,7 +133,7 @@ public sealed class SlicePhysicalButtons
     private static SlicePhysicalButton Classify(
         IReadOnlyList<SliceRawInputReport> reports)
     {
-        if (Contains(
+        if (ContainsExact(
             reports,
             collection: 2,
             reportId: 0x31,
@@ -142,7 +142,7 @@ public sealed class SlicePhysicalButtons
             return SlicePhysicalButton.VolumeUp;
         }
 
-        if (Contains(
+        if (ContainsExact(
             reports,
             collection: 2,
             reportId: 0x31,
@@ -151,25 +151,59 @@ public sealed class SlicePhysicalButtons
             return SlicePhysicalButton.VolumeDown;
         }
 
-        if (Contains(
+        // Collection 01 contains telephony state bits as well as the
+        // momentary physical-button indication. During an active call the
+        // driver keeps bit 0 (Hook Switch) set, so the same physical buttons
+        // arrive ORed with 0x01:
+        //
+        // idle mute:   00 -> 10
+        // active mute: 01 -> 11
+        //
+        // Treat the distinctive mute bit as a mask rather than requiring an
+        // exact byte value.
+        if (ContainsMasked(
             reports,
             collection: 1,
             reportId: 0x32,
-            value: 0x10))
+            mask: 0x10,
+            expected: 0x10))
         {
             return SlicePhysicalButton.Mute;
         }
 
-        if (Contains(
+        // Pickup while idle produces 02 -> 00. The low telephony-state bits
+        // therefore contain 0b10 without the active Hook Switch bit.
+        if (ContainsMasked(
             reports,
             collection: 1,
             reportId: 0x32,
-            value: 0x02))
+            mask: 0x03,
+            expected: 0x02))
         {
             return SlicePhysicalButton.Pickup;
         }
 
-        if (Contains(
+        // Once the application has entered the off-hook/active state the
+        // physical red button is translated as 03 -> 01: the same momentary
+        // 0x02 bit appears on top of the persistent 0x01 Hook Switch state.
+        if (ContainsMasked(
+                reports,
+                collection: 1,
+                reportId: 0x32,
+                mask: 0x03,
+                expected: 0x03) &&
+            ContainsMasked(
+                reports,
+                collection: 1,
+                reportId: 0x32,
+                mask: 0x03,
+                expected: 0x01))
+        {
+            return SlicePhysicalButton.Hangup;
+        }
+
+        // At idle the red button remains the standalone zero-state report.
+        if (ContainsExact(
             reports,
             collection: 1,
             reportId: 0x32,
@@ -181,7 +215,7 @@ public sealed class SlicePhysicalButtons
         return SlicePhysicalButton.Unknown;
     }
 
-    private static bool Contains(
+    private static bool ContainsExact(
         IEnumerable<SliceRawInputReport> reports,
         int collection,
         byte reportId,
@@ -193,6 +227,21 @@ public sealed class SlicePhysicalButtons
                 report.Data.Length >= 2 &&
                 report.Data[0] == reportId &&
                 report.Data[1] == value);
+    }
+
+    private static bool ContainsMasked(
+        IEnumerable<SliceRawInputReport> reports,
+        int collection,
+        byte reportId,
+        byte mask,
+        byte expected)
+    {
+        return reports.Any(
+            report =>
+                report.Collection == collection &&
+                report.Data.Length >= 2 &&
+                report.Data[0] == reportId &&
+                (report.Data[1] & mask) == expected);
     }
 
     private static async Task CaptureAsync(
