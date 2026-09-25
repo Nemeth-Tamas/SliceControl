@@ -52,6 +52,23 @@ $playlistDirectory = Join-Path $env:LOCALAPPDATA "SliceAppliance"
 New-Item -ItemType Directory -Path $playlistDirectory -Force | Out-Null
 
 $playlistPath = Join-Path $playlistDirectory "retro-radio.m3u8"
+$pidPath = Join-Path $playlistDirectory "retro-radio.pid"
+
+if (Test-Path $pidPath) {
+    try {
+        $oldPid = [int](Get-Content -Path $pidPath -ErrorAction Stop)
+        $oldProcess = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+
+        if ($null -ne $oldProcess -and $oldProcess.ProcessName -eq "vlc") {
+            Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    catch {
+    }
+
+    Remove-Item -Path $pidPath -Force -ErrorAction SilentlyContinue
+}
 
 $playlistLines = @(
     "#EXTM3U",
@@ -74,11 +91,18 @@ Write-Host "Retro Radio primary: $PrimaryStream"
 Write-Host "Retro Radio backup : $BackupStream"
 
 $arguments = @(
-    "--one-instance",
+    "--no-one-instance",
     "--no-video",
     "--qt-start-minimized",
+    "--extraintf=rc",
+    "--rc-host=127.0.0.1:4212",
     "--playlist-autostart",
     $playlistPath
 )
 
-Start-Process -FilePath $vlc -ArgumentList $arguments
+$process = Start-Process -FilePath $vlc -ArgumentList $arguments -PassThru
+[System.IO.File]::WriteAllText(
+    $pidPath,
+    $process.Id.ToString(),
+    $utf8NoBom
+)
