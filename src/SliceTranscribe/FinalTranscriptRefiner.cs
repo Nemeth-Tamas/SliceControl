@@ -133,8 +133,17 @@ internal static class FinalTranscriptRefiner
                         expectedSpeakers,
                         cancellationToken);
 
+                int detectedSpeakers =
+                    speakers
+                        .Select(
+                            turn =>
+                                turn.Speaker)
+                        .Distinct(
+                            StringComparer.Ordinal)
+                        .Count();
+
                 Console.WriteLine(
-                    $"DIARIZATION <- {speakers.Count} speaker turns");
+                    $"DIARIZATION <- {speakers.Count} speaker turns / {detectedSpeakers} speakers");
             }
             catch (Exception ex)
             {
@@ -825,7 +834,7 @@ internal static class FinalTranscriptRefiner
         text.AppendLine(
             speakers is null
                 ? "# Diarization: unavailable"
-                : "# Diarization: pyannote / word-level alignment");
+                : "# Diarization: pyannote / lexical-word alignment");
 
         text.AppendLine();
 
@@ -1057,25 +1066,72 @@ internal static class FinalTranscriptRefiner
         string left,
         string right)
     {
-        if (string.IsNullOrWhiteSpace(
-            left))
+        string leftTrimmed =
+            left.TrimEnd();
+
+        string rightTrimmed =
+            right.TrimStart();
+
+        if (leftTrimmed.Length == 0)
         {
-            return right.Trim();
+            return rightTrimmed;
         }
 
-        if (string.IsNullOrWhiteSpace(
-            right))
+        if (rightTrimmed.Length == 0)
         {
-            return left.Trim();
+            return leftTrimmed;
         }
 
-        return (
-            left.TrimEnd() +
-            " " +
-            right.TrimStart())
-            .Replace(
-                "  ",
-                " ");
+        char first =
+            rightTrimmed[0];
+
+        char last =
+            leftTrimmed[^1];
+
+        bool attachToPrevious =
+            IsClosingPunctuation(
+                first);
+
+        bool attachToNext =
+            IsOpeningPunctuation(
+                last);
+
+        string separator =
+            attachToPrevious ||
+            attachToNext
+                ? string.Empty
+                : " ";
+
+        return
+            leftTrimmed +
+            separator +
+            rightTrimmed;
+    }
+
+    private static bool IsClosingPunctuation(
+        char character)
+    {
+        return character is
+            '.' or
+            ',' or
+            '!' or
+            '?' or
+            ':' or
+            ';' or
+            ')' or
+            ']' or
+            '}' or
+            '%' or
+            '…';
+    }
+
+    private static bool IsOpeningPunctuation(
+        char character)
+    {
+        return character is
+            '(' or
+            '[' or
+            '{';
     }
 
     private static string? FindSpeaker(
@@ -1190,45 +1246,102 @@ internal static class FinalTranscriptRefiner
 
         if (!segment.TryGetProperty(
                 "words",
-                out JsonElement words) ||
-            words.ValueKind !=
+                out JsonElement tokens) ||
+            tokens.ValueKind !=
                 JsonValueKind.Array)
         {
             return result;
         }
 
-        foreach (
-            JsonElement word
-            in words.EnumerateArray())
+        var currentText =
+            new StringBuilder();
+
+        double currentStart =
+            -1;
+
+        double currentEnd =
+            -1;
+
+        double probabilityTotal =
+            0;
+
+        int probabilityCount =
+            0;
+
+        void FlushCurrent()
         {
-            if (!word.TryGetProperty(
+            if (currentText.Length == 0)
+            {
+                return;
+            }
+
+            string text =
+                currentText
+                    .ToString()
+                    .Trim();
+
+            if (text.Length > 0 &&
+                currentStart >= 0 &&
+                currentEnd >=
+                    currentStart)
+            {
+                result.Add(
+                    new WhisperWord(
+                        currentStart,
+                        currentEnd,
+                        text,
+                        probabilityCount > 0
+                            ? probabilityTotal /
+                              probabilityCount
+                            : 0.5));
+            }
+
+            currentText.Clear();
+
+            currentStart =
+                -1;
+
+            currentEnd =
+                -1;
+
+            probabilityTotal =
+                0;
+
+            probabilityCount =
+                0;
+        }
+
+        foreach (
+            JsonElement token
+            in tokens.EnumerateArray())
+        {
+            if (!token.TryGetProperty(
                     "word",
                     out JsonElement textElement))
             {
                 continue;
             }
 
-            string text =
+            string piece =
                 textElement.GetString()
                 ?? string.Empty;
 
+            if (piece.Length == 0)
+            {
+                continue;
+            }
+
             double start =
                 ReadDouble(
-                    word,
+                    token,
                     "start",
                     -1);
 
             double end =
                 ReadDouble(
-                    word,
+                    token,
                     "end",
                     -1);
-
-            double probability =
-                ReadDouble(
-                    word,
-                    "probability",
-                    0.5);
 
             if (start < 0 ||
                 end < start)
@@ -1236,13 +1349,63 @@ internal static class FinalTranscriptRefiner
                 continue;
             }
 
-            result.Add(
-                new WhisperWord(
-                    start,
-                    end,
-                    text,
-                    probability));
+            double probability =
+                ReadDouble(
+                    token,
+                    "probability",
+                    0.5);
+
+            bool beginsWithWhitespace =
+                char.IsWhiteSpace(
+                    piece[0]);
+
+            string trimmedPiece =
+                piece.TrimStart();
+
+            bool punctuationOnly =
+                trimmedPiece.Length > 0 &&
+                trimmedPiece.All(
+                    character =>
+                        char.IsPunctuation(
+                            character) ||
+                        char.IsSymbol(
+                            character));
+
+            if (currentText.Length > 0 &&
+                beginsWithWhitespace &&
+                !punctuationOnly)
+            {
+                FlushCurrent();
+            }
+
+            if (currentText.Length == 0)
+            {
+                currentStart =
+                    start;
+
+                currentText.Append(
+                    trimmedPiece);
+            }
+            else
+            {
+                currentText.Append(
+                    beginsWithWhitespace
+                        ? trimmedPiece
+                        : piece);
+            }
+
+            currentEnd =
+                Math.Max(
+                    currentEnd,
+                    end);
+
+            probabilityTotal +=
+                probability;
+
+            probabilityCount++;
         }
+
+        FlushCurrent();
 
         return result;
     }
