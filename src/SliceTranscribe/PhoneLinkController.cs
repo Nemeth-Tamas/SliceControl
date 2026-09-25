@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Windows.Automation;
+using System.Text;
 
 namespace SliceTranscribe;
 
@@ -30,48 +30,147 @@ internal static class PhoneLinkController
 
     public static bool TryToggleMediaPlayback()
     {
-        AutomationElement? button =
-            FindPhoneLinkElementByAutomationId(
-                "PlayPauseButton");
+        const string script = """
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
-        if (button is null)
-        {
-            Console.Error.WriteLine(
-                "PHONE LINK -> PlayPauseButton was not found.");
+$root = [Windows.Automation.AutomationElement]::RootElement
+$processes = Get-Process -Name 'PhoneExperienceHost' -ErrorAction SilentlyContinue
 
-            return false;
-        }
+foreach ($process in $processes) {
+    $processCondition = New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::ProcessIdProperty,
+        $process.Id
+    )
+
+    $idCondition = New-Object Windows.Automation.PropertyCondition(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        'PlayPauseButton'
+    )
+
+    $condition = New-Object Windows.Automation.AndCondition(
+        $processCondition,
+        $idCondition
+    )
+
+    $button = $root.FindFirst(
+        [Windows.Automation.TreeScope]::Descendants,
+        $condition
+    )
+
+    if ($null -eq $button) {
+        continue
+    }
+
+    $pattern = $button.GetCurrentPattern(
+        [Windows.Automation.InvokePattern]::Pattern
+    )
+
+    if ($null -eq $pattern) {
+        continue
+    }
+
+    $label = $button.Current.Name
+    $pattern.Invoke()
+
+    if ([string]::IsNullOrWhiteSpace($label)) {
+        Write-Output 'media play/pause'
+    }
+    else {
+        Write-Output ('media play/pause (' + $label + ')')
+    }
+
+    exit 0
+}
+
+Write-Error 'PlayPauseButton was not found.'
+exit 1
+""";
 
         try
         {
-            if (!button.TryGetCurrentPattern(
-                InvokePattern.Pattern,
-                out object? patternObject))
+            string encoded =
+                Convert.ToBase64String(
+                    Encoding.Unicode.GetBytes(
+                        script));
+
+            var startInfo =
+                new ProcessStartInfo
+                {
+                    FileName =
+                        "powershell.exe",
+
+                    Arguments =
+                        $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}",
+
+                    UseShellExecute =
+                        false,
+
+                    CreateNoWindow =
+                        true,
+
+                    RedirectStandardOutput =
+                        true,
+
+                    RedirectStandardError =
+                        true
+                };
+
+            using Process? process =
+                Process.Start(
+                    startInfo);
+
+            if (process is null)
             {
                 Console.Error.WriteLine(
-                    "PHONE LINK -> PlayPauseButton does not expose InvokePattern.");
+                    "PHONE LINK -> could not start UI Automation helper.");
 
                 return false;
             }
 
-            string label =
-                button.Current.Name;
+            string output =
+                process.StandardOutput.ReadToEnd();
 
-            ((InvokePattern)patternObject).Invoke();
+            string error =
+                process.StandardError.ReadToEnd();
+
+            process.WaitForExit(
+                5000);
+
+            if (!process.HasExited)
+            {
+                try
+                {
+                    process.Kill(
+                        entireProcessTree: true);
+                }
+                catch
+                {
+                }
+
+                Console.Error.WriteLine(
+                    "PHONE LINK -> media control timed out.");
+
+                return false;
+            }
+
+            if (process.ExitCode != 0)
+            {
+                Console.Error.WriteLine(
+                    string.IsNullOrWhiteSpace(error)
+                        ? "PHONE LINK -> media control failed."
+                        : $"PHONE LINK -> media control failed: {error.Trim()}");
+
+                return false;
+            }
 
             Console.WriteLine(
-                string.IsNullOrWhiteSpace(label)
+                string.IsNullOrWhiteSpace(output)
                     ? "PHONE LINK -> media play/pause"
-                    : $"PHONE LINK -> media play/pause ({label})");
+                    : $"PHONE LINK -> {output.Trim()}");
 
             return true;
-        }
-        catch (ElementNotAvailableException)
-        {
-            Console.Error.WriteLine(
-                "PHONE LINK -> PlayPauseButton disappeared before it could be invoked.");
-
-            return false;
         }
         catch (Exception ex)
         {
@@ -79,55 +178,6 @@ internal static class PhoneLinkController
                 $"PHONE LINK -> media control failed: {ex.Message}");
 
             return false;
-        }
-    }
-
-    private static AutomationElement?
-        FindPhoneLinkElementByAutomationId(
-            string automationId)
-    {
-        Process[] processes =
-            Process.GetProcessesByName(
-                "PhoneExperienceHost");
-
-        try
-        {
-            foreach (Process process in processes)
-            {
-                var processCondition =
-                    new PropertyCondition(
-                        AutomationElement.ProcessIdProperty,
-                        process.Id);
-
-                var idCondition =
-                    new PropertyCondition(
-                        AutomationElement.AutomationIdProperty,
-                        automationId);
-
-                var condition =
-                    new AndCondition(
-                        processCondition,
-                        idCondition);
-
-                AutomationElement? element =
-                    AutomationElement.RootElement.FindFirst(
-                        TreeScope.Descendants,
-                        condition);
-
-                if (element is not null)
-                {
-                    return element;
-                }
-            }
-
-            return null;
-        }
-        finally
-        {
-            foreach (Process process in processes)
-            {
-                process.Dispose();
-            }
         }
     }
 
