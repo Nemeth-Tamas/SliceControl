@@ -106,6 +106,17 @@ internal sealed class AudioRecorder :
                 IsRecording = false;
                 IsPaused = false;
 
+                try
+                {
+                    PhoneAudioSessionController.ReleaseMuteAsync(
+                        "recording")
+                        .GetAwaiter()
+                        .GetResult();
+                }
+                catch
+                {
+                }
+
                 _writer.Dispose();
                 _capture.Dispose();
 
@@ -213,6 +224,10 @@ internal sealed class AudioRecorder :
                 finalPath,
                 overwrite: true);
         }
+
+        await PhoneAudioSessionController.ReleaseMuteAsync(
+            "recording",
+            cancellationToken);
 
         return finalPath;
     }
