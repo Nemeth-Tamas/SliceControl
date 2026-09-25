@@ -71,6 +71,29 @@ public sealed class SliceDevice
             consumerTask);
     }
 
+    public async Task WatchRawAsync(
+        Action<SliceRawInputReport> callback,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+
+        Task col01 =
+            WatchRawCollectionAsync(
+                Paths.Collection01,
+                1,
+                callback,
+                cancellationToken);
+
+        Task col02 =
+            WatchRawCollectionAsync(
+                Paths.Collection02,
+                2,
+                callback,
+                cancellationToken);
+
+        await Task.WhenAll(col01, col02);
+    }
+
     private async Task WatchTelephonyAsync(
         Action<SliceButtonEvent> callback,
         CancellationToken cancellationToken)
@@ -109,11 +132,19 @@ public sealed class SliceDevice
 
             byte current = buffer[1];
 
-            EmitChanges(
+            // Absolute controls represent an actual state.
+            EmitAbsoluteChanges(
                 reportId: 0x32,
                 previous,
                 current,
-                TelephonyButtons,
+                TelephonyAbsoluteButtons,
+                callback);
+
+            // Relative controls are events, not held button states.
+            EmitTriggers(
+                reportId: 0x32,
+                current,
+                TelephonyTriggerButtons,
                 callback);
 
             previous = current;
@@ -158,7 +189,7 @@ public sealed class SliceDevice
 
             byte current = buffer[1];
 
-            EmitChanges(
+            EmitAbsoluteChanges(
                 reportId: 0x31,
                 previous,
                 current,
@@ -169,7 +200,48 @@ public sealed class SliceDevice
         }
     }
 
-    private static void EmitChanges(
+    private static async Task WatchRawCollectionAsync(
+        string path,
+        int collection,
+        Action<SliceRawInputReport> callback,
+        CancellationToken cancellationToken)
+    {
+        using FileStream stream =
+            HidIo.OpenRead(path);
+
+        byte[] buffer = new byte[64];
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            int read;
+
+            try
+            {
+                read = await stream.ReadAsync(
+                    buffer,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (read <= 0)
+            {
+                continue;
+            }
+
+            byte[] report =
+                buffer.Take(read).ToArray();
+
+            callback(
+                new SliceRawInputReport(
+                    collection,
+                    report));
+        }
+    }
+
+    private static void EmitAbsoluteChanges(
         byte reportId,
         byte previous,
         byte current,
@@ -186,13 +258,37 @@ public sealed class SliceDevice
                 continue;
             }
 
-            bool pressed =
+            bool active =
                 (current & mask) != 0;
 
             callback(
                 new SliceButtonEvent(
                     button,
-                    pressed,
+                    active
+                        ? SliceButtonEventKind.Down
+                        : SliceButtonEventKind.Up,
+                    reportId,
+                    current));
+        }
+    }
+
+    private static void EmitTriggers(
+        byte reportId,
+        byte current,
+        IReadOnlyDictionary<byte, SliceButton> map,
+        Action<SliceButtonEvent> callback)
+    {
+        foreach ((byte mask, SliceButton button) in map)
+        {
+            if ((current & mask) == 0)
+            {
+                continue;
+            }
+
+            callback(
+                new SliceButtonEvent(
+                    button,
+                    SliceButtonEventKind.Triggered,
                     reportId,
                     current));
         }
@@ -221,18 +317,28 @@ public sealed class SliceDevice
                     StringComparison.OrdinalIgnoreCase));
     }
 
+    // HID descriptor says these are Absolute (81 02).
     private static readonly IReadOnlyDictionary<byte, SliceButton>
-        TelephonyButtons =
+        TelephonyAbsoluteButtons =
             new Dictionary<byte, SliceButton>
             {
                 [0x01] = SliceButton.HookSwitch,
                 [0x02] = SliceButton.Flash,
-                [0x04] = SliceButton.Redial,
                 [0x08] = SliceButton.SpeakerPhone,
-                [0x10] = SliceButton.PhoneMute,
                 [0x20] = SliceButton.Send,
-                [0x40] = SliceButton.SpeedDial,
+
+                // Bit 7 still needs further descriptor / hardware mapping.
                 [0x80] = SliceButton.Button7
+            };
+
+    // HID descriptor explicitly marks these Relative (81 06).
+    private static readonly IReadOnlyDictionary<byte, SliceButton>
+        TelephonyTriggerButtons =
+            new Dictionary<byte, SliceButton>
+            {
+                [0x04] = SliceButton.Redial,
+                [0x10] = SliceButton.PhoneMute,
+                [0x40] = SliceButton.SpeedDial
             };
 
     private static readonly IReadOnlyDictionary<byte, SliceButton>

@@ -80,6 +80,10 @@ try
             await WatchAsync(slice);
             break;
 
+        case "watchraw":
+            await WatchRawAsync(slice);
+            break;
+
         case "raw":
             RunRaw(slice, args);
             break;
@@ -156,6 +160,30 @@ static async Task WatchAsync(
         {
             Console.WriteLine(
                 $"{DateTime.Now:HH:mm:ss.fff}  {ev}");
+        },
+        cts.Token);
+}
+
+static async Task WatchRawAsync(
+    SliceDevice slice)
+{
+    using var cts =
+        new CancellationTokenSource();
+
+    Console.CancelKeyPress += (_, eventArgs) =>
+    {
+        eventArgs.Cancel = true;
+        cts.Cancel();
+    };
+
+    Console.WriteLine(
+        "Watching raw Slice HID reports. Press Ctrl+C to stop.");
+
+    await slice.WatchRawAsync(
+        report =>
+        {
+            Console.WriteLine(
+                $"{DateTime.Now:HH:mm:ss.fff}  {report}");
         },
         cts.Token);
 }
@@ -270,6 +298,7 @@ Usage:
 
   slicectl sweep
   slicectl watch
+  slicectl watchraw
 
   slicectl raw FE 00 07 00 32 00 00 00
   slicectl rawff 00
