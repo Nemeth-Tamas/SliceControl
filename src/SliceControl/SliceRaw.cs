@@ -11,6 +11,27 @@ public sealed class SliceRaw
         _paths = paths;
     }
 
+    public void SendCollection01(byte reportId, byte value)
+    {
+        if (reportId is not (0x41 or 0x42))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(reportId),
+                "Collection 01 output report ID must be 0x41 or 0x42.");
+        }
+
+        byte[] report =
+        {
+            reportId,
+            value
+        };
+
+        using FileStream stream = HidIo.OpenWrite(_paths.Collection01);
+
+        stream.Write(report, 0, report.Length);
+        stream.Flush();
+    }
+
     public void SendCollection03(params byte[] report)
     {
         if (report.Length != 8)
