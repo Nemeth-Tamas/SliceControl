@@ -389,7 +389,7 @@ try
                         $"Saved: {saved}");
                 }
 
-                await RadioController.PlayAsync(
+                await RadioController.ResumeAsync(
                     CancellationToken.None);
             }
             catch (Exception ex)
@@ -494,6 +494,9 @@ static async Task RunButtonLoopAsync(
     ChannelReader<SlicePhysicalButtonEvent> reader,
     CancellationToken cancellationToken)
 {
+    bool radioPausedByRecording =
+        false;
+
     await foreach (
         SlicePhysicalButtonEvent ev
         in reader.ReadAllAsync(
@@ -510,11 +513,11 @@ static async Task RunButtonLoopAsync(
                     break;
                 }
 
-                bool radioPaused =
+                radioPausedByRecording =
                     await RadioController.PauseAsync(
                         cancellationToken);
 
-                if (radioPaused)
+                if (radioPausedByRecording)
                 {
                     await Task.Delay(
                         100,
@@ -530,10 +533,13 @@ static async Task RunButtonLoopAsync(
                 }
                 catch
                 {
-                    if (radioPaused)
+                    if (radioPausedByRecording)
                     {
-                        await RadioController.PlayAsync(
+                        await RadioController.ResumeAsync(
                             CancellationToken.None);
+
+                        radioPausedByRecording =
+                            false;
                     }
 
                     throw;
@@ -593,8 +599,14 @@ static async Task RunButtonLoopAsync(
 
                 slice.Lights.ExitAnimation();
 
-                await RadioController.PlayAsync(
-                    cancellationToken);
+                if (radioPausedByRecording)
+                {
+                    await RadioController.ResumeAsync(
+                        cancellationToken);
+
+                    radioPausedByRecording =
+                        false;
+                }
 
                 string? transcript =
                     null;
