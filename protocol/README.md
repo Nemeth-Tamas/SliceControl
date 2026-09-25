@@ -85,16 +85,34 @@ Observed during testing:
 32 00
 ```
 
-Current confirmed physical behavior:
+Confirmed physical-button behavior from a clean three-button trace:
 
-- `32 02` is produced by the green pickup control in the tested sequence.
-- `32 10` is associated with the mute control and behaves like a triggered
-  telephony action rather than a normal held key.
-- The red hangup control does not currently expose a unique, confirmed bit in
-  the decoded Col01 stream. It may clear telephony state or use another
-  collection.
+```text
+Green pickup:
+32 02
+32 00
 
-The exact physical-button mapping is still being documented.
+Red hangup:
+32 00
+
+Mute:
+32 00
+32 10
+```
+
+Additional `31 00` Collection 02 reports may accompany these telephony reports
+without representing a volume press.
+
+Interpretation:
+
+- Green pickup produces a momentary `0x02` telephony pulse.
+- Red hangup is represented by a standalone/all-zero telephony state report;
+  there is no dedicated nonzero Col01 bit for the physical red button in the
+  tested driver.
+- Mute produces a zero-state prelude followed immediately by the relative
+  `0x10` mute trigger.
+
+This mapping has now been reproduced directly on hardware.
 
 ---
 
@@ -683,10 +701,53 @@ when present.
 During direct button testing, Collection 05 remained silent for the tested
 pickup, hangup, mute, volume-down, and volume-up sequence.
 
-The red hangup control therefore does not appear to use Collection 05 in the
-tested configuration. In Collection 01 traces it is associated with an
-otherwise-ambiguous `32 00` state-clear report rather than a unique dedicated
-button bit.
+Reverse engineering of `HPSliceTelephony.sys` found driver-internal key
+identifiers `0x006F0005`, `0x00700005`, and `0x00730005`. Their branches
+map to the observed pickup, hangup/state-clear, and mute behavior respectively.
+The values are consistent with keyboard usage IDs F20, F21, and F24 associated
+with Collection 05, but the unfiltered keyboard reports have not yet been
+captured directly.
+
+The HP lower filter translates/intercepts these inputs before the normal
+user-mode Collection 05 monitor sees them.
+
+---
+
+# Private HP PDO Control Path
+
+The stock driver exposes a private device path:
+
+```text
+\\.\HPSlicePDO_SYM_03F0
+```
+
+Confirmed IOCTLs found in the HP driver/service:
+
+| IOCTL | Name / observed role |
+|---:|---|
+| `0x3C4A2004` | Volume change notification / redraw using supplied volume byte |
+| `0x3C4A2008` | Register key-press event handle |
+| `0x3C4A200C` | Deregister key-press event |
+| `0x3C4A2010` | Send HELLO |
+| `0x3C4A2014` | Send GOOD_BYE |
+| `0x3C4A2018` | Volume endpoint helper for the 100% case |
+| `0x3C4A201C` | Volume endpoint helper for the 0% case |
+
+Hardware-confirmed behavior:
+
+- `0x3C4A2010` produces the same white hello animation as `FE 00 08 ...`.
+- `0x3C4A2014` produces the same white goodbye animation as `FE 00 09 ...`.
+- `0x3C4A2004` accepts a one-byte volume value and drives the volume
+  visualization when an event has first been registered on the same persistent
+  PDO handle.
+- The private PDO is stateful per open handle. Opening a fresh handle for each
+  `0x3C4A2004` request does not reproduce the stock service behavior.
+- Registering a Windows event with `0x3C4A2008` and keeping the same PDO
+  handle open causes all five tested Collaboration Cover controls to signal the
+  event: pickup, hangup, mute, volume down, and volume up.
+
+The registered event therefore acts as a general recognized-key notification,
+not merely a volume-only notification.
 
 ---
 
