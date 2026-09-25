@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Windows.Automation;
 
 namespace SliceTranscribe;
 
@@ -25,6 +26,109 @@ internal static class PhoneLinkController
         return TrySendShortcut(
             VkH,
             "hang up");
+    }
+
+    public static bool TryToggleMediaPlayback()
+    {
+        AutomationElement? button =
+            FindPhoneLinkElementByAutomationId(
+                "PlayPauseButton");
+
+        if (button is null)
+        {
+            Console.Error.WriteLine(
+                "PHONE LINK -> PlayPauseButton was not found.");
+
+            return false;
+        }
+
+        try
+        {
+            if (!button.TryGetCurrentPattern(
+                InvokePattern.Pattern,
+                out object? patternObject))
+            {
+                Console.Error.WriteLine(
+                    "PHONE LINK -> PlayPauseButton does not expose InvokePattern.");
+
+                return false;
+            }
+
+            string label =
+                button.Current.Name;
+
+            ((InvokePattern)patternObject).Invoke();
+
+            Console.WriteLine(
+                string.IsNullOrWhiteSpace(label)
+                    ? "PHONE LINK -> media play/pause"
+                    : $"PHONE LINK -> media play/pause ({label})");
+
+            return true;
+        }
+        catch (ElementNotAvailableException)
+        {
+            Console.Error.WriteLine(
+                "PHONE LINK -> PlayPauseButton disappeared before it could be invoked.");
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"PHONE LINK -> media control failed: {ex.Message}");
+
+            return false;
+        }
+    }
+
+    private static AutomationElement?
+        FindPhoneLinkElementByAutomationId(
+            string automationId)
+    {
+        Process[] processes =
+            Process.GetProcessesByName(
+                "PhoneExperienceHost");
+
+        try
+        {
+            foreach (Process process in processes)
+            {
+                var processCondition =
+                    new PropertyCondition(
+                        AutomationElement.ProcessIdProperty,
+                        process.Id);
+
+                var idCondition =
+                    new PropertyCondition(
+                        AutomationElement.AutomationIdProperty,
+                        automationId);
+
+                var condition =
+                    new AndCondition(
+                        processCondition,
+                        idCondition);
+
+                AutomationElement? element =
+                    AutomationElement.RootElement.FindFirst(
+                        TreeScope.Descendants,
+                        condition);
+
+                if (element is not null)
+                {
+                    return element;
+                }
+            }
+
+            return null;
+        }
+        finally
+        {
+            foreach (Process process in processes)
+            {
+                process.Dispose();
+            }
+        }
     }
 
     private static bool TrySendShortcut(
