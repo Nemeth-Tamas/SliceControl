@@ -183,16 +183,16 @@ static async Task WatchPhysicalButtonsAsync(
     bool restoreService =
         HpTelephonyService.IsRunning();
 
-    if (restoreService)
-    {
-        Console.WriteLine(
-            "Temporarily stopping HPSliceTelephonyService for private key-event ownership...");
-
-        HpTelephonyService.StopAndWait();
-    }
-
     try
     {
+        if (restoreService)
+        {
+            Console.WriteLine(
+                "Temporarily stopping HPSliceTelephonyService for private key-event ownership...");
+
+            HpTelephonyService.StopAndWait();
+        }
+
         Console.WriteLine(
             "Watching physical Slice buttons. Press Ctrl+C to stop.");
 
@@ -214,7 +214,8 @@ static async Task WatchPhysicalButtonsAsync(
     }
     finally
     {
-        if (restoreService)
+        if (restoreService &&
+            !HpTelephonyService.IsRunning())
         {
             Console.WriteLine(
                 "Restoring HPSliceTelephonyService...");
