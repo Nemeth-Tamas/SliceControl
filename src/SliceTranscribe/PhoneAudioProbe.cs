@@ -146,14 +146,15 @@ internal static class PhoneAudioProbe
             "Press Ctrl+C here to release the phone connection.");
 
         var completion =
-            new TaskCompletionSource(
+            new TaskCompletionSource<bool>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
 
         ConsoleCancelEventHandler handler =
             (_, eventArgs) =>
             {
                 eventArgs.Cancel = true;
-                completion.TrySetResult();
+                completion.TrySetResult(
+                    true);
             };
 
         Console.CancelKeyPress +=
