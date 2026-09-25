@@ -7,8 +7,6 @@ internal sealed class PhoneAudioManager :
     IAsyncDisposable
 {
     private readonly string? _preferredName;
-    private readonly TimeSpan _connectedPoll =
-        TimeSpan.FromSeconds(2);
     private readonly TimeSpan _retryDelay =
         TimeSpan.FromSeconds(5);
 
@@ -25,8 +23,7 @@ internal sealed class PhoneAudioManager :
     }
 
     public bool IsConnected =>
-        _connection?.State ==
-        AudioPlaybackConnectionState.Opened;
+        _connection is not null;
 
     public string? ConnectedDeviceName =>
         _connectedDeviceName;
@@ -36,17 +33,6 @@ internal sealed class PhoneAudioManager :
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (IsConnected)
-            {
-                await Task.Delay(
-                    _connectedPoll,
-                    cancellationToken);
-
-                continue;
-            }
-
-            await ReleaseConnectionAsync();
-
             try
             {
                 DeviceInformation? device =
@@ -88,31 +74,71 @@ internal sealed class PhoneAudioManager :
                 _connectedDeviceName =
                     device.Name;
 
-                connection.StateChanged +=
-                    OnStateChanged;
+                var closed =
+                    new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
 
-                Console.WriteLine(
-                    $"PHONE -> enabling {device.Name}");
-
-                await connection.StartAsync();
-
-                Console.WriteLine(
-                    $"PHONE -> opening {device.Name}");
-
-                AudioPlaybackConnectionOpenResult result =
-                    await connection.OpenAsync();
-
-                Console.WriteLine(
-                    $"PHONE OPEN -> {result.Status}");
-
-                if (result.Status !=
-                    AudioPlaybackConnectionOpenResultStatus.Success)
+                void StateChanged(
+                    AudioPlaybackConnection sender,
+                    object args)
                 {
-                    await ReleaseConnectionAsync();
+                    Console.WriteLine(
+                        $"PHONE STATE -> {sender.State}");
 
-                    await Task.Delay(
-                        _retryDelay,
+                    if (sender.State ==
+                        AudioPlaybackConnectionState.Closed)
+                    {
+                        Console.WriteLine(
+                            "PHONE -> disconnected; reconnect will be attempted automatically");
+
+                        closed.TrySetResult(
+                            true);
+                    }
+                }
+
+                connection.StateChanged +=
+                    StateChanged;
+
+                try
+                {
+                    Console.WriteLine(
+                        $"PHONE -> enabling {device.Name}");
+
+                    await connection.StartAsync();
+
+                    Console.WriteLine(
+                        $"PHONE -> opening {device.Name}");
+
+                    AudioPlaybackConnectionOpenResult result =
+                        await connection.OpenAsync();
+
+                    Console.WriteLine(
+                        $"PHONE OPEN -> {result.Status}");
+
+                    if (result.Status !=
+                        AudioPlaybackConnectionOpenResultStatus.Success)
+                    {
+                        await Task.Delay(
+                            _retryDelay,
+                            cancellationToken);
+
+                        continue;
+                    }
+
+                    // OpenAsync Success is authoritative. Do not immediately
+                    // poll State here: after an RF reconnect Windows can lag
+                    // briefly before State/StateChanged settles to Opened.
+                    // Keep this successful connection alive until Windows
+                    // explicitly raises Closed.
+                    await closed.Task.WaitAsync(
                         cancellationToken);
+                }
+                finally
+                {
+                    connection.StateChanged -=
+                        StateChanged;
+
+                    await ReleaseConnectionAsync();
                 }
             }
             catch (OperationCanceledException)
@@ -127,9 +153,17 @@ internal sealed class PhoneAudioManager :
 
                 await ReleaseConnectionAsync();
 
-                await Task.Delay(
-                    _retryDelay,
-                    cancellationToken);
+                try
+                {
+                    await Task.Delay(
+                        _retryDelay,
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
         }
     }
@@ -171,29 +205,11 @@ internal sealed class PhoneAudioManager :
             return devices[0];
         }
 
-        DeviceInformation? iphone =
-            devices.FirstOrDefault(
-                device =>
-                    device.Name.Contains(
-                        "iPhone",
-                        StringComparison.OrdinalIgnoreCase));
-
-        return iphone;
-    }
-
-    private void OnStateChanged(
-        AudioPlaybackConnection sender,
-        object args)
-    {
-        Console.WriteLine(
-            $"PHONE STATE -> {sender.State}");
-
-        if (sender.State ==
-            AudioPlaybackConnectionState.Closed)
-        {
-            Console.WriteLine(
-                "PHONE -> disconnected; reconnect will be attempted automatically");
-        }
+        return devices.FirstOrDefault(
+            device =>
+                device.Name.Contains(
+                    "iPhone",
+                    StringComparison.OrdinalIgnoreCase));
     }
 
     private Task ReleaseConnectionAsync()
@@ -202,9 +218,6 @@ internal sealed class PhoneAudioManager :
         {
             try
             {
-                _connection.StateChanged -=
-                    OnStateChanged;
-
                 _connection.Dispose();
             }
             catch
