@@ -47,6 +47,22 @@ try
             "phone must be 'list' or 'connect'.");
     }
 
+    if (command == "media")
+    {
+        string mediaCommand =
+            args.Length >= 2
+                ? args[1].ToLowerInvariant()
+                : "list";
+
+        if (mediaCommand == "list")
+        {
+            return await MediaControlProbe.ListAsync();
+        }
+
+        throw new ArgumentException(
+            "media currently supports only 'list'.");
+    }
+
     if (command == "model")
     {
         string downloadedModelPath =
@@ -969,6 +985,7 @@ Usage:
   SliceTranscribe phone list
   SliceTranscribe phone connect
   SliceTranscribe phone connect --name "device name"
+  SliceTranscribe media list
 
 Default transcription backend:
 
