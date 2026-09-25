@@ -20,6 +20,9 @@ internal sealed class OpenAIRealtimeTranscriber :
     private const int TargetChunkSamples =
         2400;
 
+    private const int MinimumCommitBytes =
+        TargetSampleRate * 2 / 10;
+
     private static readonly string[] Keywords =
     {
         "Cellnet",
@@ -66,6 +69,7 @@ internal sealed class OpenAIRealtimeTranscriber :
 
     private readonly BufferedWaveProvider _bufferedInput;
     private readonly WdlResamplingSampleProvider _resampler;
+    private readonly int _normalDrainThresholdBytes;
 
     private Task? _receiveTask;
     private Task? _audioPumpTask;
@@ -88,15 +92,27 @@ internal sealed class OpenAIRealtimeTranscriber :
         _transcriptPath =
             transcriptPath;
 
+        WaveFormat sampleFormat =
+            sourceFormat is WaveFormatExtensible extensible
+                ? extensible.ToStandardWaveFormat()
+                : sourceFormat;
+
         _bufferedInput =
             new BufferedWaveProvider(
-                sourceFormat)
+                sampleFormat)
             {
                 BufferDuration =
                     TimeSpan.FromSeconds(10),
                 DiscardOnBufferOverflow = false,
                 ReadFully = false
             };
+
+        _normalDrainThresholdBytes =
+            Math.Max(
+                sampleFormat.BlockAlign,
+                AlignDown(
+                    sampleFormat.AverageBytesPerSecond / 8,
+                    sampleFormat.BlockAlign));
 
         ISampleProvider samples =
             _bufferedInput
@@ -344,6 +360,7 @@ internal sealed class OpenAIRealtimeTranscriber :
                     bytesSinceCommit +=
                         await DrainResamplerAsync(
                             sampleBuffer,
+                            flush: false,
                             cancellationToken);
 
                     break;
@@ -354,9 +371,11 @@ internal sealed class OpenAIRealtimeTranscriber :
                         bytesSinceCommit +=
                             await DrainResamplerAsync(
                                 sampleBuffer,
+                                flush: true,
                                 cancellationToken);
 
-                        if (bytesSinceCommit == 0)
+                        if (bytesSinceCommit <
+                            MinimumCommitBytes)
                         {
                             commit.Completion.TrySetResult(
                                 null);
@@ -400,16 +419,33 @@ internal sealed class OpenAIRealtimeTranscriber :
 
     private async Task<int> DrainResamplerAsync(
         float[] sampleBuffer,
+        bool flush,
         CancellationToken cancellationToken)
     {
         int totalBytes =
             0;
 
-        // The loop limit is only a safety guard against a misbehaving provider.
+        // NAudio 2.x's WDL provider behaves best when its streaming source has
+        // enough data available to satisfy a read. Keep about 125 ms buffered
+        // during normal streaming, then allow the remainder through on commit.
         for (int pass = 0;
              pass < 128;
              pass++)
         {
+            if (!flush &&
+                _bufferedInput.BufferedBytes <
+                    _normalDrainThresholdBytes)
+            {
+                break;
+            }
+
+            if (flush &&
+                _bufferedInput.BufferedBytes == 0 &&
+                pass == 0)
+            {
+                break;
+            }
+
             int samplesRead =
                 _resampler.Read(
                     sampleBuffer,
@@ -663,6 +699,20 @@ internal sealed class OpenAIRealtimeTranscriber :
             Environment.NewLine,
             new UTF8Encoding(
                 encoderShouldEmitUTF8Identifier: false));
+    }
+
+    private static int AlignDown(
+        int value,
+        int alignment)
+    {
+        if (alignment <= 1)
+        {
+            return value;
+        }
+
+        return value -
+               value %
+               alignment;
     }
 
     private static string ReadErrorMessage(
