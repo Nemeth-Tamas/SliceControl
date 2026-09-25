@@ -12,12 +12,15 @@ public sealed class SliceDevice
 
     public SliceRaw Raw { get; }
 
+    public SliceTelephony Telephony { get; }
+
     private SliceDevice(SliceDevicePaths paths)
     {
         Paths = paths;
 
         Raw = new SliceRaw(paths);
         Lights = new SliceLights(Raw);
+        Telephony = new SliceTelephony(Raw);
     }
 
     public static SliceDevice Open()
