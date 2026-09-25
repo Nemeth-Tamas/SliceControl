@@ -25,7 +25,14 @@ Reusable .NET API.
 
 Small command-line utility built on the same API.
 
-No external NuGet packages are currently required.
+`SliceTranscribe.exe`
+
+Button-driven microphone recorder and, next, Hungarian transcription app for
+the Slice. It references `SliceControl.dll` directly and uses NAudio for
+Windows WASAPI microphone capture.
+
+SliceControl itself has no external NuGet dependencies; SliceTranscribe uses
+NAudio.
 
 ## Build
 
@@ -304,6 +311,71 @@ slicectl service start
 ```
 
 Stopping/starting the service normally requires an elevated terminal.
+
+## SliceTranscribe - first audio milestone
+
+The first SliceTranscribe milestone deliberately stops before speech-to-text:
+it proves the complete Collaboration Cover -> microphone -> WAV lifecycle
+first.
+
+Build everything:
+
+```powershell
+git pull
+dotnet build SliceControl.slnx
+```
+
+List active microphone endpoints:
+
+```powershell
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe mics
+```
+
+Run using the default communications microphone:
+
+```powershell
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe run
+```
+
+Or select a microphone by a unique part of its name:
+
+```powershell
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe run --mic "Bang & Olufsen"
+```
+
+The current controls are:
+
+```text
+GREEN pickup  -> start recording
+MUTE          -> pause / resume recording
+RED hangup    -> stop and finalize WAV
+VOL +/-       -> detected, reserved for app controls
+Ctrl+C        -> quit safely
+```
+
+While recording, the panel enters the green active-call presentation. Pausing
+switches to the red/yellow muted presentation; resuming returns to green.
+Stopping uses the normal call exit state.
+
+Recordings default to:
+
+```text
+%USERPROFILE%\Documents\SliceTranscribe\Recordings
+```
+
+A custom output directory can be supplied with:
+
+```powershell
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe run --output "D:\Recordings"
+```
+
+SliceTranscribe temporarily stops `HPSliceTelephonyService` while running so
+it can own the private button-event registration. It restores the service on
+normal exit and through its cleanup path after application errors.
+
+The next milestone, after validating a real WAV from the Slice microphone, is
+live Hungarian speech-to-text while preserving the same physical-button state
+machine.
 
 ## Status
 
