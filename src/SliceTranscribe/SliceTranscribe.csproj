@@ -10,10 +10,7 @@
     <RootNamespace>SliceTranscribe</RootNamespace>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Reference Include="UIAutomationClient" />
-    <Reference Include="UIAutomationTypes" />
-    <ProjectReference Include="..\SliceControl\SliceControl.csproj" />
+  <ItemGroup>    <ProjectReference Include="..\SliceControl\SliceControl.csproj" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Whisper.net" Version="1.8.1" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.8.1" />
