@@ -32,11 +32,16 @@ internal sealed class AudioRecorder :
 
     public bool IsPaused { get; private set; }
 
+    public event EventHandler<AudioChunkEventArgs>? AudioChunkAvailable;
+
     public string DeviceName =>
         _device.FriendlyName;
 
     public string? CurrentFile =>
         _finalPath;
+
+    public WaveFormat? CaptureFormat =>
+        _capture?.WaveFormat;
 
     public string Start()
     {
@@ -229,6 +234,9 @@ internal sealed class AudioRecorder :
         object? sender,
         WaveInEventArgs e)
     {
+        byte[]? transcriptionCopy =
+            null;
+
         lock (_gate)
         {
             if (!IsRecording ||
@@ -242,6 +250,24 @@ internal sealed class AudioRecorder :
                 e.Buffer,
                 0,
                 e.BytesRecorded);
+
+            if (AudioChunkAvailable is not null)
+            {
+                transcriptionCopy =
+                    e.Buffer
+                        .AsSpan(
+                            0,
+                            e.BytesRecorded)
+                        .ToArray();
+            }
+        }
+
+        if (transcriptionCopy is not null)
+        {
+            AudioChunkAvailable?.Invoke(
+                this,
+                new AudioChunkEventArgs(
+                    transcriptionCopy));
         }
     }
 
