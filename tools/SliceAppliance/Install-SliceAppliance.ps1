@@ -9,6 +9,9 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $project = Join-Path $repoRoot "src\SliceTranscribe\SliceTranscribe.csproj"
+$remotePort = 8787
+$remotePrefix = "http://+:$remotePort/"
+$remoteRuleName = "Slice Remote Control"
 
 # Stop an already-running copy before rebuilding so Windows does not keep the
 # Release executable locked. This also replaces the old visible console copy
@@ -19,6 +22,31 @@ Get-Process -Name "SliceTranscribe" -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 
 Start-Sleep -Milliseconds 250
+
+Write-Host "Configuring Slice remote control listener..."
+
+try {
+    & netsh http delete urlacl url=$remotePrefix *> $null
+}
+catch {
+}
+
+try {
+    & netsh http add urlacl url=$remotePrefix user="$env:USERDOMAIN\$env:USERNAME" *> $null
+}
+catch {
+    Write-Warning "Could not reserve $remotePrefix. The scheduled task may still work when elevated."
+}
+
+try {
+    Get-NetFirewallRule -DisplayName $remoteRuleName -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+
+    New-NetFirewallRule -DisplayName $remoteRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $remotePort -Profile Any | Out-Null
+}
+catch {
+    Write-Warning "Could not create Windows Firewall rule for TCP $remotePort."
+}
 
 Write-Host "Building SliceTranscribe Release..."
 dotnet build $project -c Release
@@ -93,6 +121,20 @@ if (-not $NoStart) {
     Write-Host ("  SliceTranscribe: {0} (LastTaskResult {1})" -f $transcribeState, $transcribeTask.LastTaskResult)
     Write-Host ("  Slice Retro Radio: {0} (LastTaskResult {1})" -f $radioState, $radioTask.LastTaskResult)
     Write-Host ("  SliceTranscribe logs: {0}" -f (Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs"))
+
+    $tokenPath = Join-Path $env:LOCALAPPDATA "SliceAppliance\remote-token.txt"
+    $announcementPath = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "SliceTranscribe\Announcements"
+
+    if (Test-Path $tokenPath) {
+        $token = (Get-Content $tokenPath -Raw).Trim()
+
+        Write-Host
+        Write-Host "Remote control:"
+        Write-Host ("  URL:   http://<Slice-VPN-IP>:{0}/" -f $remotePort)
+        Write-Host ("  Token: {0}" -f $token)
+        Write-Host ("  Token file: {0}" -f $tokenPath)
+        Write-Host ("  Announcements: {0}" -f $announcementPath)
+    }
 }
 
 Write-Host
