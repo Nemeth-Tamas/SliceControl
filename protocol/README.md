@@ -64,21 +64,15 @@ Descriptor-derived mapping:
 | `40` | Speed Dial |
 | `80` | Button 7 |
 
-Release is represented by the corresponding bit clearing.
+The descriptor contains both absolute and relative controls, so not every bit
+should be interpreted as a held key.
 
-For example:
+Current API interpretation:
 
-```text
-32 10
-```
-
-means the Phone Mute control is pressed.
-
-```text
-32 00
-```
-
-means all controls are released.
+- Absolute/state-like controls are surfaced as Down/Up transitions.
+- Relative controls such as Phone Mute are surfaced as Triggered events.
+- Raw `32 00` reports are retained for reverse engineering and are not assumed
+  to mean a dedicated physical Hangup press.
 
 Observed during testing:
 
@@ -87,8 +81,18 @@ Observed during testing:
 32 00
 
 32 10
+
 32 00
 ```
+
+Current confirmed physical behavior:
+
+- `32 02` is produced by the green pickup control in the tested sequence.
+- `32 10` is associated with the mute control and behaves like a triggered
+  telephony action rather than a normal held key.
+- The red hangup control does not currently expose a unique, confirmed bit in
+  the decoded Col01 stream. It may clear telephony state or use another
+  collection.
 
 The exact physical-button mapping is still being documented.
 
@@ -540,8 +544,12 @@ Usage:
 
 Windows exposes this as a standard HID keyboard device.
 
+SliceControl now discovers this collection and includes it in `watchraw`
+when present.
+
 Further investigation is still required to determine which Collaboration
-Cover actions are emitted through this collection.
+Cover actions are emitted through this collection, especially whether the red
+hangup control appears here.
 
 ---
 
@@ -639,7 +647,7 @@ Future work may include:
 
 - Definitive physical-button mapping.
 - Collection 04 reverse engineering.
-- Collection 05 reverse engineering.
+- Collection 05 reverse engineering, including the red hangup control.
 - Additional undocumented LED states.
 - Event-based application bindings.
 - A Windows HID filter driver capable of intercepting selected controls
