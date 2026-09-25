@@ -76,7 +76,7 @@ try
                   ?? "http://192.168.1.2:8766";
 
         string? finalPath =
-            await FinalTranscriptRefiner.RefineAsync(
+            await WindowedConsensusRefiner.RefineAsync(
                 args[1],
                 finalizeWhisperServer,
                 finalizeDiarizationServer);
@@ -732,8 +732,9 @@ Default transcription backend:
       whisper.cpp HTTP server at http://192.168.1.2:8765
       Intended for full large-v3 on the RTX 3090 home PC.
       Defaults to microphone channel 0 and 12-second live chunks.
-      Finalization re-transcribes every available microphone channel and builds
-      a confidence/consensus transcript. Speaker diarization defaults to:
+      Finalization re-transcribes every available microphone channel in
+      12-second windows, compares the six hypotheses, and keeps the strongest
+      consensus per window. Speaker diarization defaults to:
       http://192.168.1.2:8766
 
 Optional backends:
