@@ -310,6 +310,11 @@ try
     var audioActivity =
         new AudioActivityMonitor();
 
+    await using var remoteControl =
+        new RemoteControlServer(
+            slice,
+            recording);
+
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -338,6 +343,9 @@ try
     Task? audioActivityTask =
         null;
 
+    Task? remoteControlTask =
+        null;
+
     try
     {
         if (restoreHpService)
@@ -358,6 +366,10 @@ try
             audioActivity.RunAsync(
                 cts.Token);
 
+        remoteControlTask =
+            remoteControl.RunAsync(
+                cts.Token);
+
         Console.WriteLine(
             "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
 
@@ -365,6 +377,12 @@ try
             phoneName is null
                 ? "Phone audio: automatic A2DP source discovery/reconnect"
                 : $"Phone audio: automatic A2DP reconnect for {phoneName}");
+
+        Console.WriteLine(
+            $"Remote control: http://<Slice-VPN-IP>:{remoteControl.Port}/");
+
+        Console.WriteLine(
+            $"Remote token: {remoteControl.Token}");
 
         Console.WriteLine(
             $"Microphone: {recorder.DeviceName}");
@@ -504,6 +522,22 @@ try
             {
                 Console.Error.WriteLine(
                     $"Audio activity monitor stopped with an error: {ex.Message}");
+            }
+        }
+
+        if (remoteControlTask is not null)
+        {
+            try
+            {
+                await remoteControlTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Remote control server stopped with an error: {ex.Message}");
             }
         }
 
