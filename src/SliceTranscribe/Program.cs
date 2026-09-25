@@ -407,9 +407,6 @@ try
 
         slice.Lights.Reset();
 
-        await RadioController.ResetAsync(
-            cts.Token);
-
         phoneAudioTask =
             phoneAudio.RunAsync(
                 cts.Token);
@@ -422,7 +419,7 @@ try
             "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
 
         Console.WriteLine(
-            "Call integration: manual test commands only; normal runtime stays A2DP-only");
+            "Audio runtime: stable A2DP-only baseline; call experiments are manual commands only");
 
         Console.WriteLine(
             phoneName is null
