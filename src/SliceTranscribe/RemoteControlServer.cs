@@ -1,4 +1,5 @@
 using NAudio.CoreAudioApi;
+using NAudio.MediaFoundation;
 using NAudio.Wave;
 using SliceControl;
 using System.Collections.Concurrent;
@@ -508,6 +509,22 @@ internal sealed class RemoteControlServer :
         using var capture =
             new WasapiCapture(
                 microphone);
+
+        byte[] formatMessage =
+            Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        sampleRate =
+                            capture.WaveFormat.SampleRate
+                    }));
+
+        await socket.SendAsync(
+            new ArraySegment<byte>(
+                formatMessage),
+            WebSocketMessageType.Text,
+            endOfMessage: true,
+            cancellationToken);
 
         using var sendGate =
             new SemaphoreSlim(
@@ -1080,11 +1097,31 @@ internal sealed class RemoteControlServer :
                 frames *
                 2];
 
+        WaveFormatExtensible? extensible =
+            format as
+                WaveFormatExtensible;
+
         bool ieeeFloat =
-            format.Encoding ==
-                WaveFormatEncoding.IeeeFloat &&
+            (
+                format.Encoding ==
+                    WaveFormatEncoding.IeeeFloat ||
+                (
+                    extensible is not null &&
+                    extensible.SubFormat ==
+                        AudioSubtypes.MFAudioFormat_Float
+                )
+            ) &&
             format.BitsPerSample ==
                 32;
+
+        bool pcm =
+            format.Encoding ==
+                WaveFormatEncoding.Pcm ||
+            (
+                extensible is not null &&
+                extensible.SubFormat ==
+                    AudioSubtypes.MFAudioFormat_PCM
+            );
 
         for (int frame = 0;
              frame < frames;
@@ -1104,8 +1141,7 @@ internal sealed class RemoteControlServer :
                         source);
             }
             else if (
-                format.Encoding ==
-                    WaveFormatEncoding.Pcm &&
+                pcm &&
                 format.BitsPerSample ==
                     16)
             {
@@ -1116,8 +1152,28 @@ internal sealed class RemoteControlServer :
                     32768f;
             }
             else if (
-                format.Encoding ==
-                    WaveFormatEncoding.Pcm &&
+                pcm &&
+                format.BitsPerSample ==
+                    24)
+            {
+                int value =
+                    buffer[source] |
+                    (buffer[source + 1] << 8) |
+                    (buffer[source + 2] << 16);
+
+                if ((value & 0x00800000) != 0)
+                {
+                    value |=
+                        unchecked(
+                            (int)0xff000000);
+                }
+
+                sample =
+                    value /
+                    8388608f;
+            }
+            else if (
+                pcm &&
                 format.BitsPerSample ==
                     32)
             {
@@ -1372,7 +1428,7 @@ button.danger{background:#652d2d}
 </main>
 
 <script>
-let monitorSocket=null, monitorContext=null, nextPlay=0;
+let monitorSocket=null, monitorContext=null, nextPlay=0, monitorSampleRate=48000;
 let talkSocket=null, talkContext=null, talkStream=null, talkProcessor=null;
 let lastMics='';
 
@@ -1446,8 +1502,15 @@ async function toggleListen(){
     monitorSocket=new WebSocket(wsUrl('/ws/monitor?token='+encodeURIComponent(token())+'&mic='+encodeURIComponent(mic)));
     monitorSocket.binaryType='arraybuffer';
     monitorSocket.onmessage=e=>{
+      if(typeof e.data==='string'){
+        try{
+          const meta=JSON.parse(e.data);
+          if(meta.sampleRate) monitorSampleRate=meta.sampleRate;
+        }catch{}
+        return;
+      }
       const input=new Int16Array(e.data);
-      const buf=monitorContext.createBuffer(1,input.length,48000);
+      const buf=monitorContext.createBuffer(1,input.length,monitorSampleRate);
       const out=buf.getChannelData(0);
       for(let i=0;i<input.length;i++) out[i]=input[i]/32768;
       const src=monitorContext.createBufferSource();
