@@ -30,6 +30,27 @@ try
         return 0;
     }
 
+    if (command == "probechannels")
+    {
+        if (args.Length < 2)
+        {
+            throw new ArgumentException(
+                "probechannels requires a WAV path.");
+        }
+
+        string probeServer =
+            ReadOption(
+                args,
+                "--remote-url")
+            ?? "http://192.168.1.2:8765";
+
+        await ChannelProbe.RunAsync(
+            args[1],
+            probeServer);
+
+        return 0;
+    }
+
     if (command is not "run")
     {
         PrintHelp();
@@ -612,6 +633,8 @@ Usage:
 
   SliceTranscribe model
   SliceTranscribe model --model "C:\path\ggml-base.bin"
+  SliceTranscribe probechannels "C:\path\recording.wav"
+  SliceTranscribe probechannels "C:\path\recording.wav" --remote-url "http://192.168.1.2:8765"
   SliceTranscribe mics
 
 Default transcription backend:
