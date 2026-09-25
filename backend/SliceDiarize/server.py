@@ -1,8 +1,9 @@
 import asyncio
+import io
 import os
-import tempfile
-from pathlib import Path
+import wave
 
+import numpy as np
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pyannote.audio import Pipeline
@@ -60,72 +61,103 @@ async def health():
 async def diarize(
     file: UploadFile = File(...),
 ):
-    suffix = (
-        Path(file.filename or "recording.wav")
-        .suffix
-        or ".wav"
-    )
+    data = await file.read()
 
-    temp_path = None
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded audio file is empty.",
+        )
 
     try:
-        data = await file.read()
+        with wave.open(
+            io.BytesIO(data),
+            "rb",
+        ) as wav:
+            channels = wav.getnchannels()
+            sample_width = wav.getsampwidth()
+            sample_rate = wav.getframerate()
+            frame_count = wav.getnframes()
+            pcm = wav.readframes(frame_count)
+    except wave.Error as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Expected a PCM WAV file: {exc}",
+        ) from exc
 
-        if not data:
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded audio file is empty.",
-            )
-
-        with tempfile.NamedTemporaryFile(
-            suffix=suffix,
-            delete=False,
-        ) as temp:
-            temp.write(data)
-            temp_path = temp.name
-
-        async with pipeline_lock:
-            output = await asyncio.to_thread(
-                pipeline,
-                temp_path,
-            )
-
-        annotation = getattr(
-            output,
-            "exclusive_speaker_diarization",
-            None,
+    if sample_width != 2:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "SliceDiarize expects 16-bit PCM WAV input; "
+                f"received sample width {sample_width * 8} bits."
+            ),
         )
 
-        if annotation is None:
-            annotation = output.speaker_diarization
+    samples = np.frombuffer(
+        pcm,
+        dtype="<i2",
+    ).astype(
+        np.float32,
+    )
 
-        segments = []
-
-        for turn, speaker in annotation:
-            segments.append(
-                {
-                    "start": float(turn.start),
-                    "end": float(turn.end),
-                    "speaker": str(speaker),
-                }
-            )
-
-        speakers = sorted(
-            {
-                segment["speaker"]
-                for segment in segments
-            }
+    if channels > 1:
+        samples = (
+            samples
+            .reshape(-1, channels)
+            .mean(axis=1)
         )
 
-        return {
-            "segments": segments,
-            "speakers": speakers,
-            "speaker_count": len(speakers),
-        }
+    samples /= 32768.0
 
-    finally:
-        if temp_path:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    waveform = (
+        torch.from_numpy(
+            samples.copy(),
+        )
+        .unsqueeze(0)
+    )
+
+    audio_input = {
+        "waveform": waveform,
+        "sample_rate": sample_rate,
+    }
+
+    async with pipeline_lock:
+        output = await asyncio.to_thread(
+            pipeline,
+            audio_input,
+        )
+
+    annotation = getattr(
+        output,
+        "exclusive_speaker_diarization",
+        None,
+    )
+
+    if annotation is None:
+        annotation = output.speaker_diarization
+
+    segments = []
+
+    for turn, speaker in annotation:
+        segments.append(
+        {
+                "start": float(turn.start),
+                "end": float(turn.end),
+                "speaker": str(speaker),
+    }
+    )
+
+    speakers = sorted(
+        {
+            segment["speaker"]
+            for segment in segments
+    }
+    )
+
+    return {
+        "segments": segments,
+        "speakers": speakers,
+        "speaker_count": len(speakers),
+    }
+
