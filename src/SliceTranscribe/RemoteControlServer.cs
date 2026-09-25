@@ -603,19 +603,41 @@ internal sealed class RemoteControlServer :
             if (path == "/api/announce/record/stop" &&
                 context.Request.HttpMethod == "POST")
             {
+                if (!_announcementRecorder.IsRecording)
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        409,
+                        new
+                        {
+                            error =
+                                "No announcement recording is active."
+                        });
+
+                    return;
+                }
+
                 string? file =
-                    await _announcementRecorder.StopAsync(
-                        cancellationToken);
+                    null;
 
-                await PhoneAudioSessionController.ReleaseMuteAsync(
-                    "announcement-recording",
-                    CancellationToken.None);
+                try
+                {
+                    file =
+                        await _announcementRecorder.StopAsync(
+                            cancellationToken);
+                }
+                finally
+                {
+                    await PhoneAudioSessionController.ReleaseMuteAsync(
+                        "announcement-recording",
+                        CancellationToken.None);
 
-                await RadioController.ReleasePauseAsync(
-                    "announcement-recording",
-                    CancellationToken.None);
+                    await RadioController.ReleasePauseAsync(
+                        "announcement-recording",
+                        CancellationToken.None);
 
-                RefreshIndicator();
+                    RefreshIndicator();
+                }
 
                 await WriteJsonAsync(
                     context.Response,
@@ -1659,7 +1681,7 @@ internal sealed class RemoteControlServer :
         response.Close();
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         try
         {
@@ -1671,21 +1693,41 @@ internal sealed class RemoteControlServer :
         {
         }
 
+        bool wasRecording =
+            _announcementRecorder.IsRecording;
+
         try
         {
-            _announcementRecorder
-                .DisposeAsync()
-                .AsTask()
-                .GetAwaiter()
-                .GetResult();
+            await _announcementRecorder.DisposeAsync();
         }
         catch
         {
         }
 
-        _speakerGate.Dispose();
+        if (wasRecording)
+        {
+            try
+            {
+                await PhoneAudioSessionController.ReleaseMuteAsync(
+                    "announcement-recording",
+                    CancellationToken.None);
+            }
+            catch
+            {
+            }
 
-        return ValueTask.CompletedTask;
+            try
+            {
+                await RadioController.ReleasePauseAsync(
+                    "announcement-recording",
+                    CancellationToken.None);
+            }
+            catch
+            {
+            }
+        }
+
+        _speakerGate.Dispose();
     }
 
     private const string Html =
