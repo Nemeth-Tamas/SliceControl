@@ -16,6 +16,20 @@ try
         return 0;
     }
 
+    if (command == "model")
+    {
+        string modelPath =
+            await LocalWhisperModel.EnsureBaseAsync(
+                ReadOption(
+                    args,
+                    "--model"));
+
+        Console.WriteLine(
+            $"Local Whisper model: {modelPath}");
+
+        return 0;
+    }
+
     if (command is not "run")
     {
         PrintHelp();
@@ -42,11 +56,52 @@ try
             args,
             "--no-transcribe");
 
-    string? apiKey =
+    string transcriptionMode =
         noTranscription
-            ? null
-            : Environment.GetEnvironmentVariable(
+            ? "none"
+            : (
+                ReadOption(
+                    args,
+                    "--transcriber")
+                ?? "local")
+                .ToLowerInvariant();
+
+    if (transcriptionMode is not (
+        "local" or
+        "openai" or
+        "none"))
+    {
+        throw new ArgumentException(
+            "--transcriber must be local, openai, or none.");
+    }
+
+    string? modelPath =
+        null;
+
+    string? apiKey =
+        null;
+
+    if (transcriptionMode == "local")
+    {
+        modelPath =
+            await LocalWhisperModel.EnsureBaseAsync(
+                ReadOption(
+                    args,
+                    "--model"));
+    }
+    else if (transcriptionMode == "openai")
+    {
+        apiKey =
+            Environment.GetEnvironmentVariable(
                 "OPENAI_API_KEY");
+
+        if (string.IsNullOrWhiteSpace(
+            apiKey))
+        {
+            throw new InvalidOperationException(
+                "OPENAI_API_KEY is required when --transcriber openai is selected.");
+        }
+    }
 
     SliceDevice slice =
         SliceDevice.Open();
@@ -60,10 +115,22 @@ try
             microphone,
             outputDirectory);
 
-    await using var transcription =
-        new LiveTranscriptionController(
-            recorder,
-            apiKey);
+    await using ITranscriptionController transcription =
+        transcriptionMode switch
+        {
+            "local" =>
+                new LocalWhisperTranscriptionController(
+                    recorder,
+                    modelPath!),
+
+            "openai" =>
+                new LiveTranscriptionController(
+                    recorder,
+                    apiKey),
+
+            _ =>
+                new DisabledTranscriptionController()
+        };
 
     using var cts =
         new CancellationTokenSource();
@@ -108,20 +175,26 @@ try
         Console.WriteLine(
             $"Recordings: {outputDirectory}");
 
-        if (transcription.Enabled)
+        switch (transcriptionMode)
         {
-            Console.WriteLine(
-                "Live transcription: OpenAI gpt-live-transcribe, Hungarian");
-        }
-        else if (noTranscription)
-        {
-            Console.WriteLine(
-                "Live transcription: disabled by --no-transcribe");
-        }
-        else
-        {
-            Console.WriteLine(
-                "Live transcription: disabled - OPENAI_API_KEY is not set");
+            case "local":
+                Console.WriteLine(
+                    "Transcription: local Whisper multilingual base / CPU / Hungarian");
+
+                Console.WriteLine(
+                    $"Model: {modelPath}");
+
+                break;
+
+            case "openai":
+                Console.WriteLine(
+                    "Transcription: OpenAI gpt-live-transcribe / Hungarian");
+                break;
+
+            default:
+                Console.WriteLine(
+                    "Transcription: disabled");
+                break;
         }
 
         Console.WriteLine();
@@ -271,7 +344,7 @@ static async Task PumpButtonsAsync(
 static async Task RunButtonLoopAsync(
     SliceDevice slice,
     AudioRecorder recorder,
-    LiveTranscriptionController transcription,
+    ITranscriptionController transcription,
     ChannelReader<SlicePhysicalButtonEvent> reader,
     CancellationToken cancellationToken)
 {
@@ -316,14 +389,11 @@ static async Task RunButtonLoopAsync(
 
                         Console.WriteLine(
                             $"TRANSCRIBING -> {transcriptPath}");
-
-                        Console.Write(
-                            "LIVE -> ");
                     }
                     catch (Exception ex)
                     {
                         Console.Error.WriteLine(
-                            $"Could not start live transcription: {ex.Message}");
+                            $"Could not start transcription: {ex.Message}");
 
                         Console.Error.WriteLine(
                             "Recording will continue without transcription.");
@@ -346,6 +416,8 @@ static async Task RunButtonLoopAsync(
                     await recorder.StopAsync(
                         cancellationToken);
 
+                slice.Lights.ExitAnimation();
+
                 string? transcript =
                     null;
 
@@ -357,12 +429,9 @@ static async Task RunButtonLoopAsync(
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine();
                     Console.Error.WriteLine(
                         $"Could not finalize transcription: {ex.Message}");
                 }
-
-                slice.Lights.ExitAnimation();
 
                 Console.WriteLine();
                 Console.WriteLine(
@@ -392,19 +461,14 @@ static async Task RunButtonLoopAsync(
                 {
                     slice.Lights.ShowActiveMutedCall();
 
-                    Console.WriteLine();
                     Console.WriteLine(
                         "PAUSED");
 
-                    try
+                    if (transcription.Enabled)
                     {
-                        await transcription.CommitAsync(
-                            cancellationToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine(
-                            $"Could not finalize transcript segment: {ex.Message}");
+                        _ =
+                            CommitTranscriptSegmentAsync(
+                                transcription);
                     }
                 }
                 else
@@ -413,12 +477,6 @@ static async Task RunButtonLoopAsync(
 
                     Console.WriteLine(
                         "RECORDING");
-
-                    if (transcription.Enabled)
-                    {
-                        Console.Write(
-                            "LIVE -> ");
-                    }
                 }
 
                 break;
@@ -438,6 +496,20 @@ static async Task RunButtonLoopAsync(
                     $"Unknown Slice input: {FormatEvidence(ev)}");
                 break;
         }
+    }
+}
+
+static async Task CommitTranscriptSegmentAsync(
+    ITranscriptionController transcription)
+{
+    try
+    {
+        await transcription.CommitAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(
+            $"Could not finalize transcript segment: {ex.Message}");
     }
 }
 
@@ -503,21 +575,36 @@ Usage:
   SliceTranscribe run
   SliceTranscribe run --mic "microphone name"
   SliceTranscribe run --output "C:\path\to\recordings"
+
+  SliceTranscribe run --transcriber local
+  SliceTranscribe run --transcriber openai
+  SliceTranscribe run --transcriber none
   SliceTranscribe run --no-transcribe
+
+  SliceTranscribe model
+  SliceTranscribe model --model "C:\path\ggml-base.bin"
   SliceTranscribe mics
 
-Environment:
+Default transcription backend:
 
-  OPENAI_API_KEY
-      Enables live Hungarian transcription with gpt-live-transcribe.
+  local
+      Whisper multilingual base, CPU-only, Hungarian.
+      The model is downloaded once to:
+      %LOCALAPPDATA%\SliceTranscribe\Models\ggml-base.bin
+
+Optional backend:
+
+  openai
+      Uses gpt-live-transcribe and requires OPENAI_API_KEY.
 
 Controls:
 
-  Pickup -> start WAV recording + live transcription
-  Mute   -> pause/resume; pausing also commits the current transcript turn
+  Pickup -> start WAV recording + transcription
+  Mute   -> pause/resume and flush the current local transcript chunk
   Hangup -> stop and finalize WAV + TXT transcript
 
-The original WAV remains the source-of-truth recording. Final transcript turns
-are appended to a UTF-8 .txt file beside the WAV.
+The original WAV remains the source-of-truth recording. Local Whisper emits
+completed text roughly every six seconds and appends it to a UTF-8 .txt file
+beside the WAV.
 """);
 }
