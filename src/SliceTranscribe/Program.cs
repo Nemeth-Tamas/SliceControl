@@ -379,10 +379,7 @@ try
                 : $"Phone audio: automatic A2DP reconnect for {phoneName}");
 
         Console.WriteLine(
-            $"Remote control: http://<Slice-VPN-IP>:{remoteControl.Port}/");
-
-        Console.WriteLine(
-            $"Remote token: {remoteControl.Token}");
+            $"Remote control: http://{RemoteControlServer.WireGuardAddress}:{remoteControl.Port}/");
 
         Console.WriteLine(
             $"Microphone: {recorder.DeviceName}");
