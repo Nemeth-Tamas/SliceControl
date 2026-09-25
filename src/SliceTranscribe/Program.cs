@@ -109,10 +109,9 @@ try
         Console.WriteLine();
 
         buttonWatchTask =
-            slice.WatchPhysicalButtonsAsync(
-                ev =>
-                    buttonEvents.Writer.TryWrite(
-                        ev),
+            PumpButtonsAsync(
+                slice,
+                buttonEvents.Writer,
                 cts.Token);
 
         await RunButtonLoopAsync(
@@ -173,6 +172,11 @@ try
             catch (OperationCanceledException)
             {
             }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Button monitor stopped with an error: {ex.Message}");
+            }
         }
 
         if (restoreHpService &&
@@ -193,6 +197,33 @@ catch (Exception ex)
         $"{ex.GetType().Name}: {ex.Message}");
 
     return 1;
+}
+
+static async Task PumpButtonsAsync(
+    SliceDevice slice,
+    ChannelWriter<SlicePhysicalButtonEvent> writer,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        await slice.WatchPhysicalButtonsAsync(
+            ev =>
+                writer.TryWrite(
+                    ev),
+            cancellationToken);
+
+        writer.TryComplete();
+    }
+    catch (OperationCanceledException)
+        when (cancellationToken.IsCancellationRequested)
+    {
+        writer.TryComplete();
+    }
+    catch (Exception ex)
+    {
+        writer.TryComplete(ex);
+        throw;
+    }
 }
 
 static async Task RunButtonLoopAsync(
