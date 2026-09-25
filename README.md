@@ -386,7 +386,7 @@ normal exit and through its cleanup path after application errors.
 
 The HP Bang & Olufsen capture endpoint exposes six channels. To diagnose which
 array channel best isolates useful speech before choosing a fixed channel, run
-the same recording through large-v3-turbo one channel at a time:
+the same recording through large-v3 one channel at a time:
 
 ```powershell
 .\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe probechannels "C:\path\recording.wav"
@@ -406,7 +406,7 @@ The default backend is now the whisper.cpp HTTP server at:
 http://192.168.1.2:8765
 ```
 
-This is intended to keep `large-v3-turbo` resident on the RTX 3090 while the
+This is intended to keep `large-v3` resident on the RTX 3090 while the
 Slice remains responsible only for microphone capture, button handling, WAV
 recording, chunking, and HTTP transport.
 
@@ -422,9 +422,11 @@ The same mode can be selected explicitly:
 SliceTranscribe run --transcriber remote --remote-url "http://192.168.1.2:8765"
 ```
 
-Roughly six-second microphone chunks are converted to 16 kHz mono PCM16 WAV,
-filtered through the same light client-side speech-energy gate used by the
-local backend, then POSTed to whisper.cpp's `/inference` endpoint. Each
+Roughly twelve-second microphone chunks are taken from a fixed B&O input
+channel, converted to 16 kHz mono PCM16 WAV, filtered through the same light
+client-side speech-energy gate used by the local backend, then POSTed to
+whisper.cpp's `/inference` endpoint. Channel 0 is the current default and can
+be overridden with `--remote-channel`. Each
 request explicitly asks for Hungarian, JSON output, zero temperature,
 non-speech suppression, and the shop-specific prompt.
 
