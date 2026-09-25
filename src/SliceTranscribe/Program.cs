@@ -30,7 +30,7 @@ try
 
         if (phoneCommand == "connect")
         {
-            string? phoneName =
+            string? requestedPhoneName =
                 ReadOption(
                     args,
                     "--name");
@@ -39,7 +39,7 @@ try
                 new CancellationTokenSource();
 
             return await PhoneAudioProbe.ConnectAsync(
-                phoneName,
+                requestedPhoneName,
                 phoneCts.Token);
         }
 
