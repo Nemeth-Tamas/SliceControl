@@ -10,6 +10,16 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $project = Join-Path $repoRoot "src\SliceTranscribe\SliceTranscribe.csproj"
 
+# Stop an already-running copy before rebuilding so Windows does not keep the
+# Release executable locked. This also replaces the old visible console copy
+# with the hidden scheduled-task launcher below.
+Stop-ScheduledTask -TaskName "SliceTranscribe" -ErrorAction SilentlyContinue
+
+Get-Process -Name "SliceTranscribe" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+
+Start-Sleep -Milliseconds 250
+
 Write-Host "Building SliceTranscribe Release..."
 dotnet build $project -c Release
 
