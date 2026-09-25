@@ -225,6 +225,11 @@ try
             "--remote-channel must be zero or a positive integer.");
     }
 
+    string? phoneName =
+        ReadOption(
+            args,
+            "--phone-name");
+
     string? modelPath =
         null;
 
@@ -292,6 +297,10 @@ try
     using var cts =
         new CancellationTokenSource();
 
+    await using var phoneAudio =
+        new PhoneAudioManager(
+            phoneName);
+
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -314,6 +323,9 @@ try
     Task? buttonWatchTask =
         null;
 
+    Task? phoneAudioTask =
+        null;
+
     try
     {
         if (restoreHpService)
@@ -325,6 +337,15 @@ try
         }
 
         slice.Lights.Reset();
+
+        phoneAudioTask =
+            phoneAudio.RunAsync(
+                cts.Token);
+
+        Console.WriteLine(
+            phoneName is null
+                ? "Phone audio: automatic A2DP source discovery/reconnect"
+                : $"Phone audio: automatic A2DP reconnect for {phoneName}");
 
         Console.WriteLine(
             $"Microphone: {recorder.DeviceName}");
@@ -380,6 +401,9 @@ try
 
         Console.WriteLine(
             "RED    = stop + finalize WAV/TXT");
+
+        Console.WriteLine(
+            "RED idle = toggle quiet/night mode (master output mute)");
 
         Console.WriteLine(
             "Ctrl+C = quit");
@@ -468,6 +492,22 @@ try
             {
                 Console.Error.WriteLine(
                     $"Button monitor stopped with an error: {ex.Message}");
+            }
+        }
+
+        if (phoneAudioTask is not null)
+        {
+            try
+            {
+                await phoneAudioTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Phone audio manager stopped with an error: {ex.Message}");
             }
         }
 
@@ -617,8 +657,23 @@ static async Task RunButtonLoopAsync(
             case SlicePhysicalButton.Hangup:
                 if (!recorder.IsRecording)
                 {
+                    bool quietMode =
+                        SystemAudioController.ToggleMute();
+
                     Console.WriteLine(
-                        "Nothing to stop.");
+                        quietMode
+                            ? "QUIET MODE -> ON (master output muted)"
+                            : "QUIET MODE -> OFF (master output unmuted)");
+
+                    if (quietMode)
+                    {
+                        slice.Lights.SetMutedCall(
+                            0);
+
+                        await Task.Delay(
+                            500,
+                            cancellationToken);
+                    }
 
                     slice.Lights.Reset();
                     break;
@@ -868,6 +923,7 @@ Usage:
   SliceTranscribe run --transcriber openai
   SliceTranscribe run --transcriber none
   SliceTranscribe run --no-transcribe
+  SliceTranscribe run --phone-name "Tamás's iPhone"
 
   SliceTranscribe model
   SliceTranscribe model --model "C:\path\ggml-base.bin"
@@ -907,6 +963,13 @@ Controls:
   Pickup -> start WAV recording + transcription
   Mute   -> pause/resume and flush the current local transcript chunk
   Hangup -> stop and finalize WAV + TXT transcript
+  Hangup while idle -> toggle quiet/night mode (master output mute)
+
+Phone audio:
+
+  The run mode automatically discovers a paired Bluetooth A2DP source,
+  opens it as a Windows audio sink, and reconnects after disconnects.
+  Use --phone-name to prefer a specific paired device when needed.
 
 The original WAV remains the source-of-truth recording. The remote Whisper
 backend emits completed text roughly every twelve seconds; the local fallback
