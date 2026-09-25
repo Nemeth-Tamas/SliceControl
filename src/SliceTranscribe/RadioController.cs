@@ -8,22 +8,102 @@ internal static class RadioController
     private const string Host = "127.0.0.1";
     private const int Port = 4212;
 
-    public static Task<bool> PauseAsync(
+    private static readonly SemaphoreSlim Gate =
+        new(
+            1,
+            1);
+
+    private static readonly HashSet<string> PauseReasons =
+        new(
+            StringComparer.OrdinalIgnoreCase);
+
+    private static bool _paused;
+
+    public static async Task<bool> RequestPauseAsync(
+        string reason,
         CancellationToken cancellationToken = default)
     {
-        return SendAsync(
-            "pause",
+        await Gate.WaitAsync(
             cancellationToken);
+
+        try
+        {
+            PauseReasons.Add(
+                reason);
+
+            if (_paused)
+            {
+                return true;
+            }
+
+            bool sent =
+                await SendAsync(
+                    "pause",
+                    cancellationToken);
+
+            if (!sent)
+            {
+                PauseReasons.Remove(
+                    reason);
+
+                return false;
+            }
+
+            _paused =
+                true;
+
+            Console.WriteLine(
+                $"RADIO -> paused ({string.Join(", ", PauseReasons)})");
+
+            return true;
+        }
+        finally
+        {
+            Gate.Release();
+        }
     }
 
-    public static Task<bool> ResumeAsync(
+    public static async Task<bool> ReleasePauseAsync(
+        string reason,
         CancellationToken cancellationToken = default)
     {
-        // VLC RC's "pause" command is a state toggle. Using "play" after
-        // pausing a network stream did not reliably resume it on VLC 3.0.24.
-        return SendAsync(
-            "pause",
+        await Gate.WaitAsync(
             cancellationToken);
+
+        try
+        {
+            PauseReasons.Remove(
+                reason);
+
+            if (!_paused ||
+                PauseReasons.Count != 0)
+            {
+                return true;
+            }
+
+            // VLC RC's pause command is a state toggle. Use it again to resume.
+            bool sent =
+                await SendAsync(
+                    "pause",
+                    cancellationToken);
+
+            if (!sent)
+            {
+                return false;
+            }
+
+            _paused =
+                false;
+
+            Console.WriteLine(
+                "RADIO -> resumed");
+
+            return true;
+        }
+        finally
+        {
+            Gate.Release();
+        }
     }
 
     private static async Task<bool> SendAsync(
