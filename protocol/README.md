@@ -717,11 +717,39 @@ Windows exposes this as a standard HID keyboard device.
 SliceControl now discovers this collection and includes it in `watchraw`
 when present.
 
-Collection 05 uses report ID `0x30` and a standard keyboard-style
-8-byte payload:
+Collection 05 uses report ID `0x30` and a standard boot-keyboard-style
+payload:
 
 ```text
 30 MM 00 K1 K2 K3 K4 K5 K6
+```
+
+The exact report descriptor embedded in the HP driver is:
+
+```text
+05 01       Usage Page (Generic Desktop)
+09 06       Usage (Keyboard)
+A1 01       Collection (Application)
+85 30       Report ID (0x30)
+05 07       Usage Page (Keyboard/Keypad)
+19 E0       Usage Minimum (Left Control)
+29 E7       Usage Maximum (Right GUI)
+25 01
+15 00
+75 01
+95 08
+81 02       Input: 8 modifier bits
+75 08
+95 01
+81 03       Input: 1 reserved byte
+19 00
+29 FF
+15 00
+26 FF 00
+75 08
+95 06
+81 00       Input: 6 key usage bytes
+C0
 ```
 
 where `MM` is the modifier byte and `K1..K6` are Keyboard/Keypad usage IDs.
