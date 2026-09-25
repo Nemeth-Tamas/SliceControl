@@ -18,14 +18,14 @@ try
 
     if (command == "model")
     {
-        string modelPath =
+        string downloadedModelPath =
             await LocalWhisperModel.EnsureBaseAsync(
                 ReadOption(
                     args,
                     "--model"));
 
         Console.WriteLine(
-            $"Local Whisper model: {modelPath}");
+            $"Local Whisper model: {downloadedModelPath}");
 
         return 0;
     }
