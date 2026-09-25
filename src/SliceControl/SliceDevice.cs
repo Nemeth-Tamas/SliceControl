@@ -14,6 +14,8 @@ public sealed class SliceDevice
 
     public SliceTelephony Telephony { get; }
 
+    public SlicePhysicalButtons PhysicalButtons { get; }
+
     private SliceDevice(SliceDevicePaths paths)
     {
         Paths = paths;
@@ -21,11 +23,26 @@ public sealed class SliceDevice
         Raw = new SliceRaw(paths);
         Lights = new SliceLights(Raw);
         Telephony = new SliceTelephony(Raw);
+        PhysicalButtons = new SlicePhysicalButtons(paths);
     }
 
     public static SliceDevice Open()
     {
         return new SliceDevice(Discover());
+    }
+
+    public SlicePrivateDriver OpenPrivateDriver()
+    {
+        return SlicePrivateDriver.Open();
+    }
+
+    public Task WatchPhysicalButtonsAsync(
+        Action<SlicePhysicalButtonEvent> callback,
+        CancellationToken cancellationToken = default)
+    {
+        return PhysicalButtons.WatchAsync(
+            callback,
+            cancellationToken);
     }
 
     public static SliceDevicePaths Discover()
