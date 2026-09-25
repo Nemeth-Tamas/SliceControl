@@ -58,46 +58,59 @@ function Write-ElementTree(
 }
 
 if ($Notifications) {
-    Write-Host "Scanning visible desktop notification / toast UI..."
+    Write-Host "Scanning bottom-right desktop UI for notification / incoming-call controls..."
     Write-Host
 
-    $candidateProcesses = @(
-        "ShellExperienceHost",
-        "StartMenuExperienceHost",
-        "explorer",
-        "ApplicationFrameHost",
-        "PhoneExperienceHost"
-    )
+    Add-Type -AssemblyName System.Windows.Forms
 
-    $windows = $root.FindAll(
-        [Windows.Automation.TreeScope]::Children,
+    $virtualScreen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $minX = $virtualScreen.Left + ($virtualScreen.Width * 0.45)
+    $minY = $virtualScreen.Top + ($virtualScreen.Height * 0.45)
+
+    $elements = $root.FindAll(
+        [Windows.Automation.TreeScope]::Descendants,
         $trueCondition
     )
 
-    for ($i = 0; $i -lt $windows.Count; $i++) {
-        $window = $windows.Item($i)
+    for ($i = 0; $i -lt $elements.Count; $i++) {
+        $element = $elements.Item($i)
+        $controlType = $element.Current.ControlType.ProgrammaticName
 
-        if ($window.Current.IsOffscreen) {
+        if ($ButtonsOnly -and $controlType -ne "ControlType.Button") {
             continue
         }
 
-        $processId = $window.Current.ProcessId
+        if ($element.Current.IsOffscreen) {
+            continue
+        }
+
+        $rect = $element.Current.BoundingRectangle
+
+        if ($rect.IsEmpty) {
+            continue
+        }
+
+        if ($rect.X -lt $minX -or $rect.Y -lt $minY) {
+            continue
+        }
+
+        $name = $element.Current.Name
+        $automationId = $element.Current.AutomationId
+        $className = $element.Current.ClassName
+        $enabled = $element.Current.IsEnabled
+        $processId = $element.Current.ProcessId
         $processName = Get-ProcessNameSafe $processId
 
-        if ($candidateProcesses -notcontains $processName) {
+        if ([string]::IsNullOrWhiteSpace($name) -and [string]::IsNullOrWhiteSpace($automationId)) {
             continue
         }
 
-        $header = "WINDOW Process='{0}' Name='{1}' Class='{2}' Id='{3}'" -f $processName, $window.Current.Name, $window.Current.ClassName, $window.Current.AutomationId
-        Write-Host $header
-
-        Write-ElementTree $window "  "
-        Write-Host
+        $line = "{0} Process='{1}' Name='{2}' Id='{3}' Class='{4}' Enabled={5} Bounds=({6},{7},{8},{9})" -f $controlType, $processName, $name, $automationId, $className, $enabled, [int]$rect.X, [int]$rect.Y, [int]$rect.Width, [int]$rect.Height
+        Write-Host $line
     }
 
     exit 0
 }
-
 $processes = Get-Process -Name "PhoneExperienceHost" -ErrorAction SilentlyContinue
 
 if (-not $processes) {
