@@ -382,6 +382,22 @@ SliceTranscribe temporarily stops `HPSliceTelephonyService` while running so
 it can own the private button-event registration. It restores the service on
 normal exit and through its cleanup path after application errors.
 
+### Six-channel microphone probe
+
+The HP Bang & Olufsen capture endpoint exposes six channels. To diagnose which
+array channel best isolates useful speech before choosing a fixed channel, run
+the same recording through large-v3-turbo one channel at a time:
+
+```powershell
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe probechannels "C:\path\recording.wav"
+```
+
+The command sends each extracted 16 kHz mono channel to the configured remote
+whisper.cpp server and prints `CHANNEL 0` through `CHANNEL 5` transcripts.
+This is preferable to guessing from aggregate energy because the loudest
+microphone channel may simply be the one closest to unrelated background
+conversation.
+
 ### Remote RTX 3090 transcription
 
 The default backend is now the whisper.cpp HTTP server at:
