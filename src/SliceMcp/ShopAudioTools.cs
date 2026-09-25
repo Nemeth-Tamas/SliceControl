@@ -131,4 +131,44 @@ internal static class ShopAudioTools
         return api.GetAsync(
             "/api/radio/now-playing");
     }
+
+    [McpServerTool]
+    [Description(
+        "Returns the current Slice recording state used by the physical GREEN/MUTE/RED controls and the remote web UI.")]
+    public static Task<JsonElement> recording_status(
+        SliceApiClient api)
+    {
+        return api.GetAsync(
+            "/api/status");
+    }
+
+    [McpServerTool]
+    [Description(
+        "Starts the normal shop microphone recording and transcription path, including radio and phone-audio ducking.")]
+    public static Task<JsonElement> recording_start(
+        SliceApiClient api)
+    {
+        return api.PostAsync(
+            "/api/record/start");
+    }
+
+    [McpServerTool]
+    [Description(
+        "Pauses or resumes the current shop microphone recording.")]
+    public static Task<JsonElement> recording_pause_resume(
+        SliceApiClient api)
+    {
+        return api.PostAsync(
+            "/api/record/pause");
+    }
+
+    [McpServerTool]
+    [Description(
+        "Stops and finalizes the current shop microphone recording and transcript.")]
+    public static Task<JsonElement> recording_stop(
+        SliceApiClient api)
+    {
+        return api.PostAsync(
+            "/api/record/stop");
+    }
 }
