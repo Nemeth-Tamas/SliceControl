@@ -53,7 +53,13 @@ internal static class WindowedConsensusRefiner
 
         Console.WriteLine();
         Console.WriteLine(
-            $"FINALIZING -> {channels}-channel / {WindowDuration.TotalSeconds:0}-second window consensus");
+            $"FINALIZING -> channel 0 / {WindowDuration.TotalSeconds:0}-second large-v3 windows");
+
+        if (channels > 1)
+        {
+            Console.WriteLine(
+                $"MIC ARRAY -> {channels} exposed channels; using channel 0 because hardware analysis showed bit-identical waveforms.");
+        }
 
         using var http =
             new HttpClient
@@ -71,28 +77,22 @@ internal static class WindowedConsensusRefiner
         var finalSegments =
             new List<TranscriptSegment>();
 
-        var selectedChannelCounts =
-            new int[
-                channels];
-
-        var channelConfidenceTotal =
-            new double[
-                channels];
-
-        var channelConfidenceCount =
-            new int[
-                channels];
-
         var debug =
             new StringBuilder();
 
         debug.AppendLine(
-            "# SliceTranscribe six-channel window consensus debug");
+            "# SliceTranscribe single-channel final ASR debug");
 
         debug.AppendLine(
-            "# Final ASR deliberately uses short windows and no vocabulary prompt.");
+            "# HP B&O endpoint exposes six bit-identical channels; only channel 0 is transcribed.");
+
+        debug.AppendLine(
+            "# Final ASR uses 12-second windows, Hungarian, temperature 0, no fallback, no vocabulary prompt.");
 
         debug.AppendLine();
+
+        const int selectedChannel =
+            0;
 
         for (
             TimeSpan windowStart =
@@ -124,103 +124,44 @@ internal static class WindowedConsensusRefiner
             Console.WriteLine(
                 $"WINDOW -> {FormatTimestamp(windowStart.TotalSeconds)} - {FormatTimestamp((windowStart + duration).TotalSeconds)}");
 
+            byte[] wavBytes =
+                RenderChannelWindowToMono16k(
+                    wavPath,
+                    selectedChannel,
+                    windowStart,
+                    duration);
+
+            WindowCandidate candidate =
+                await TranscribeWindowAsync(
+                    http,
+                    inferenceUri,
+                    wavBytes,
+                    selectedChannel,
+                    windowStart.TotalSeconds,
+                    cancellationToken);
+
+            debug.Append(
+                $"## {FormatTimestamp(windowStart.TotalSeconds)} - {FormatTimestamp((windowStart + duration).TotalSeconds)} :: ");
+
             debug.AppendLine(
-                $"## {FormatTimestamp(windowStart.TotalSeconds)} - {FormatTimestamp((windowStart + duration).TotalSeconds)}");
+                candidate.Text);
 
-            var candidates =
-                new List<WindowCandidate>(
-                    channels);
-
-            for (int channel = 0;
-                 channel < channels;
-                 channel++)
-            {
-                byte[] wavBytes =
-                    RenderChannelWindowToMono16k(
-                        wavPath,
-                        channel,
-                        windowStart,
-                        duration);
-
-                WindowCandidate candidate =
-                    await TranscribeWindowAsync(
-                        http,
-                        inferenceUri,
-                        wavBytes,
-                        channel,
-                        windowStart.TotalSeconds,
-                        cancellationToken);
-
-                candidates.Add(
-                    candidate);
-
-                if (candidate.Segments.Count >
+            if (candidate.Segments.Count ==
+                    0 ||
+                candidate.Text.Length ==
                     0)
-                {
-                    channelConfidenceTotal[
-                        channel] +=
-                        candidate.Confidence;
-
-                    channelConfidenceCount[
-                        channel]++;
-                }
-
-                debug.Append(
-                    "CH");
-
-                debug.Append(
-                    channel);
-
-                debug.Append(
-                    " conf=");
-
-                debug.Append(
-                    candidate.Confidence.ToString(
-                        "0.000",
-                        CultureInfo.InvariantCulture));
-
-                debug.Append(
-                    " chars=");
-
-                debug.Append(
-                    candidate.Text.Length);
-
-                debug.Append(
-                    " :: ");
-
-                debug.AppendLine(
-                    candidate.Text);
-            }
-
-            WindowCandidate? selected =
-                SelectWindowCandidate(
-                    candidates);
-
-            if (selected is null)
             {
                 Console.WriteLine(
                     "WINDOW <- no usable speech");
 
-                debug.AppendLine(
-                    "SELECTED: none");
-
-                debug.AppendLine();
                 continue;
             }
 
-            selectedChannelCounts[
-                selected.Channel]++;
-
             finalSegments.AddRange(
-                selected.Segments);
+                candidate.Segments);
 
             Console.WriteLine(
-                $"WINDOW <- channel {selected.Channel} / confidence {selected.Confidence:0.000} / {selected.Text.Length} chars");
-
-            debug.AppendLine(
-                $"SELECTED: CH{selected.Channel}");
-
-            debug.AppendLine();
+                $"WINDOW <- confidence {candidate.Confidence:0.000} / {candidate.Text.Length} chars");
         }
 
         if (finalSegments.Count ==
@@ -235,11 +176,8 @@ internal static class WindowedConsensusRefiner
             CleanSegments(
                 finalSegments);
 
-        int diarizationChannel =
-            SelectDiarizationChannel(
-                selectedChannelCounts,
-                channelConfidenceTotal,
-                channelConfidenceCount);
+        const int diarizationChannel =
+            selectedChannel;
 
         string debugPath =
             Path.Combine(
@@ -891,7 +829,7 @@ internal static class WindowedConsensusRefiner
             "# SliceTranscribe final transcript");
 
         text.AppendLine(
-            "# Engine: whisper.cpp large-v3 / 12-second six-channel window consensus");
+            "# Engine: whisper.cpp large-v3 / 12-second single-channel windows");
 
         text.AppendLine(
             $"# Diarization channel: {diarizationChannel}");
