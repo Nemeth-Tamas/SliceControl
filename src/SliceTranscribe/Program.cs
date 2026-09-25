@@ -293,11 +293,6 @@ try
             args,
             "--phone-name");
 
-    bool experimentalCallHandoff =
-        HasFlag(
-            args,
-            "--experimental-call-handoff");
-
     string? modelPath =
         null;
 
@@ -372,10 +367,6 @@ try
     var audioActivity =
         new AudioActivityMonitor();
 
-    var callProfile =
-        new CallProfileMonitor(
-            phoneAudio);
-
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -404,9 +395,6 @@ try
     Task? audioActivityTask =
         null;
 
-    Task? callProfileTask =
-        null;
-
     try
     {
         if (restoreHpService)
@@ -430,23 +418,11 @@ try
             audioActivity.RunAsync(
                 cts.Token);
 
-        if (experimentalCallHandoff)
-        {
-            callProfileTask =
-                callProfile.RunAsync(
-                    cts.Token);
-
-            Console.WriteLine(
-                "Call handoff: EXPERIMENTAL HFP/A2DP auto-handoff enabled");
-        }
-        else
-        {
-            Console.WriteLine(
-                "Call handoff: disabled (use --experimental-call-handoff to test)");
-        }
-
         Console.WriteLine(
             "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
+
+        Console.WriteLine(
+            "Call integration: manual test commands only; normal runtime stays A2DP-only");
 
         Console.WriteLine(
             phoneName is null
@@ -634,22 +610,6 @@ try
             }
         }
 
-        if (callProfileTask is not null)
-        {
-            try
-            {
-                await callProfileTask;
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"Call profile monitor stopped with an error: {ex.Message}");
-            }
-        }
-
         if (restoreHpService &&
             !HpTelephonyService.IsRunning())
         {
@@ -707,9 +667,6 @@ static async Task RunButtonLoopAsync(
     bool radioPausedByRecording =
         false;
 
-    bool phoneMediaPausedForRecording =
-        false;
-
     await foreach (
         SlicePhysicalButtonEvent ev
         in reader.ReadAllAsync(
@@ -738,25 +695,6 @@ static async Task RunButtonLoopAsync(
                         cancellationToken);
                 }
 
-                phoneMediaPausedForRecording =
-                    false;
-
-                if (PhoneMediaActivity.IsActive())
-                {
-                    phoneMediaPausedForRecording =
-                        PhoneLinkController.TryToggleMediaPlayback();
-
-                    if (phoneMediaPausedForRecording)
-                    {
-                        Console.WriteLine(
-                            "PHONE MEDIA -> paused for recording");
-
-                        await Task.Delay(
-                            180,
-                            cancellationToken);
-                    }
-                }
-
                 string path;
 
                 try
@@ -766,14 +704,6 @@ static async Task RunButtonLoopAsync(
                 }
                 catch
                 {
-                    if (phoneMediaPausedForRecording)
-                    {
-                        PhoneLinkController.TryToggleMediaPlayback();
-
-                        phoneMediaPausedForRecording =
-                            false;
-                    }
-
                     if (radioPausedByRecording)
                     {
                         await RadioController.ReleasePauseAsync(
@@ -855,25 +785,6 @@ static async Task RunButtonLoopAsync(
                         cancellationToken);
 
                 slice.Lights.ExitAnimation();
-
-                if (phoneMediaPausedForRecording)
-                {
-                    if (PhoneLinkController.TryToggleMediaPlayback())
-                    {
-                        Console.WriteLine(
-                            "PHONE MEDIA -> resumed after recording");
-
-                        // Give the A2DP session/activity monitor time to become
-                        // active again before the recording radio hold is
-                        // released, avoiding a brief radio/phone overlap.
-                        await Task.Delay(
-                            600,
-                            cancellationToken);
-                    }
-
-                    phoneMediaPausedForRecording =
-                        false;
-                }
 
                 if (radioPausedByRecording)
                 {
@@ -1115,7 +1026,6 @@ Usage:
   SliceTranscribe run --transcriber none
   SliceTranscribe run --no-transcribe
   SliceTranscribe run --phone-name "Tamás's iPhone"
-  SliceTranscribe run --experimental-call-handoff
 
   SliceTranscribe model
   SliceTranscribe model --model "C:\path\ggml-base.bin"
