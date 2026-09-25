@@ -153,6 +153,25 @@ Important observations:
 These reports are handled by the HP driver as lifecycle/state requests rather
 than direct one-bit LED controls.
 
+
+The report descriptor also reveals the standard LED usages behind these bits.
+Bit 0 is padding/constant, so the useful mapping begins at bit 1:
+
+| Mask | HID LED usage |
+|---:|---|
+| `02` | Off-Hook (`0x17`) |
+| `04` | Ring (`0x18`) |
+| `08` | Message Waiting (`0x19`) |
+| `10` | Speaker (`0x1E`) |
+| `20` | Hold (`0x20`) |
+| `40` | Microphone (`0x21`) |
+| `80` | Send Calls (`0x24`) |
+
+This explains several previously mysterious values: `41 02` is the standard
+Off-Hook LED state, `41 04` is Ring, and `41 20` is Hold. The HP driver
+combines these standard telephony LED states with its proprietary animation
+engine.
+
 ### Report `0x42`
 
 Report layout:
@@ -698,18 +717,45 @@ Windows exposes this as a standard HID keyboard device.
 SliceControl now discovers this collection and includes it in `watchraw`
 when present.
 
-During direct button testing, Collection 05 remained silent for the tested
-pickup, hangup, mute, volume-down, and volume-up sequence.
+Collection 05 uses report ID `0x30` and a standard keyboard-style
+8-byte payload:
 
-Reverse engineering of `HPSliceTelephony.sys` found driver-internal key
-identifiers `0x006F0005`, `0x00700005`, and `0x00730005`. Their branches
-map to the observed pickup, hangup/state-clear, and mute behavior respectively.
-The values are consistent with keyboard usage IDs F20, F21, and F24 associated
-with Collection 05, but the unfiltered keyboard reports have not yet been
-captured directly.
+```text
+30 MM 00 K1 K2 K3 K4 K5 K6
+```
 
-The HP lower filter translates/intercepts these inputs before the normal
-user-mode Collection 05 monitor sees them.
+where `MM` is the modifier byte and `K1..K6` are Keyboard/Keypad usage IDs.
+
+Reverse engineering of `HPSliceTelephony.sys` shows the three Collaboration
+Cover call controls arriving internally as these raw keyboard payloads:
+
+```text
+05 00 6F 00 00 00 00 00   -> pickup
+05 00 70 00 00 00 00 00   -> hangup
+05 00 73 00 00 00 00 00   -> mute
+```
+
+The modifier byte `0x05` is Left Control + Left Alt. The first key usages are:
+
+- `0x6F` = F20
+- `0x70` = F21
+- `0x73` = F24
+
+So the raw combinations are:
+
+```text
+Ctrl+Alt+F20 -> pickup
+Ctrl+Alt+F21 -> hangup
+Ctrl+Alt+F24 -> mute
+```
+
+The filter then translates those into the observed Collection 01 telephony
+reports.
+
+Direct user-mode opening of the keyboard collection may fail because Windows
+owns it through the keyboard stack. Removing the HP lower filter and rebooting
+also caused the telephony HID topology to stop exposing Collection 01, so
+filter removal is not currently a useful capture technique.
 
 ---
 
@@ -748,6 +794,13 @@ Hardware-confirmed behavior:
 
 The registered event therefore acts as a general recognized-key notification,
 not merely a volume-only notification.
+
+
+A controlled test removing the device-specific `LowerFilters` value and
+rebooting confirmed that `HPSliceTelephony` is integral to the exposed HID
+topology: with the lower filter absent, SliceControl could no longer discover
+Collection 01. Restoring `LowerFilters=HPSliceTelephony` and rebooting restored
+all five collections and the normal translated button reports.
 
 ---
 
