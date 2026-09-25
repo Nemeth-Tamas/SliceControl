@@ -27,6 +27,142 @@ internal static class RadioController
         Stopped
     }
 
+    public static IReadOnlyDictionary<string, string> ListPresets()
+    {
+        return RadioPresetStore.List();
+    }
+
+    public static async Task<string> PlayAsync(
+        string presetOrUrl,
+        CancellationToken cancellationToken = default)
+    {
+        string url =
+            RadioPresetStore.Resolve(
+                presetOrUrl);
+
+        await Gate.WaitAsync(
+            cancellationToken);
+
+        try
+        {
+            await SendCommandAsync(
+                "clear",
+                cancellationToken);
+
+            bool added =
+                await SendCommandAsync(
+                    $"add {url}",
+                    cancellationToken);
+
+            if (!added)
+            {
+                throw new InvalidOperationException(
+                    "VLC did not accept the radio URL.");
+            }
+
+            await Task.Delay(
+                350,
+                cancellationToken);
+
+            if (PauseReasons.Count != 0)
+            {
+                await SetRadioSessionMutedAsync(
+                    muted: true,
+                    cancellationToken);
+            }
+            else
+            {
+                await SetRadioSessionMutedAsync(
+                    muted: false,
+                    cancellationToken);
+            }
+
+            Console.WriteLine(
+                $"RADIO -> playing {presetOrUrl}");
+
+            return url;
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    public static async Task<bool> StopAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await Gate.WaitAsync(
+            cancellationToken);
+
+        try
+        {
+            bool stopped =
+                await SendCommandAsync(
+                    "stop",
+                    cancellationToken);
+
+            if (stopped)
+            {
+                Console.WriteLine(
+                    "RADIO -> stopped");
+            }
+
+            return stopped;
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
+    public static async Task<string> GetNowPlayingAsync(
+        CancellationToken cancellationToken = default)
+    {
+        string? info =
+            await SendAndReadAsync(
+                "info",
+                cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(
+            info))
+        {
+            foreach (string key in new[]
+            {
+                "now_playing",
+                "title",
+                "artist"
+            })
+            {
+                string? value =
+                    TryReadInfoField(
+                        info,
+                        key);
+
+                if (!string.IsNullOrWhiteSpace(
+                    value))
+                {
+                    return value;
+                }
+            }
+        }
+
+        VlcPlaybackState state =
+            await QueryStateAsync(
+                cancellationToken);
+
+        return state.ToString();
+    }
+
+    public static async Task<string> GetPlaybackStateAsync(
+        CancellationToken cancellationToken = default)
+    {
+        VlcPlaybackState state =
+            await QueryStateAsync(
+                cancellationToken);
+
+        return state.ToString();
+    }
+
     public static async Task<bool> RequestPauseAsync(
         string reason,
         CancellationToken cancellationToken = default)
@@ -279,6 +415,53 @@ internal static class RadioController
         }
 
         return VlcPlaybackState.Unknown;
+    }
+
+    private static string? TryReadInfoField(
+        string info,
+        string key)
+    {
+        foreach (string rawLine in info.Split(
+            new[]
+            {
+                '\r',
+                '\n'
+            },
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            string line =
+                rawLine.Trim()
+                    .TrimStart(
+                        '|',
+                        '+',
+                        '-')
+                    .Trim();
+
+            int colon =
+                line.IndexOf(
+                    ':');
+
+            if (colon <= 0)
+            {
+                continue;
+            }
+
+            string field =
+                line[..colon]
+                    .Trim();
+
+            if (!field.Equals(
+                key,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return line[(colon + 1)..]
+                .Trim();
+        }
+
+        return null;
     }
 
     private static async Task<bool> SendCommandAsync(
