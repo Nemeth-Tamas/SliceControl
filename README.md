@@ -29,8 +29,9 @@ Small command-line utility built on the same API.
 
 Button-driven microphone recorder and Hungarian transcription app for the
 Slice. It references `SliceControl.dll` directly and uses NAudio for Windows
-WASAPI microphone capture. Local CPU-only Whisper is now the default
-transcription backend; the OpenAI realtime backend remains optional.
+WASAPI microphone capture. The default transcription backend is now the
+whisper.cpp server on the RTX 3090 machine; local CPU-only Whisper and the
+OpenAI realtime backend remain available as fallbacks.
 
 SliceControl itself has no external NuGet dependencies; SliceTranscribe uses
 NAudio.
@@ -381,10 +382,52 @@ SliceTranscribe temporarily stops `HPSliceTelephonyService` while running so
 it can own the private button-event registration. It restores the service on
 normal exit and through its cleanup path after application errors.
 
+### Remote RTX 3090 transcription
+
+The default backend is now the whisper.cpp HTTP server at:
+
+```text
+http://192.168.1.2:8765
+```
+
+This is intended to keep `large-v3-turbo` resident on the RTX 3090 while the
+Slice remains responsible only for microphone capture, button handling, WAV
+recording, chunking, and HTTP transport.
+
+Run normally:
+
+```powershell
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe run --mic "HP Bang & Olufsen Audio Module"
+```
+
+The same mode can be selected explicitly:
+
+```powershell
+SliceTranscribe run --transcriber remote --remote-url "http://192.168.1.2:8765"
+```
+
+Roughly six-second microphone chunks are converted to 16 kHz mono PCM16 WAV,
+filtered through the same light client-side speech-energy gate used by the
+local backend, then POSTed to whisper.cpp's `/inference` endpoint. Each
+request explicitly asks for Hungarian, JSON output, zero temperature,
+non-speech suppression, and the shop-specific prompt.
+
+Completed chunks are printed as:
+
+```text
+REMOTE TEXT -> ...
+```
+
+and appended to the matching UTF-8 transcript beside the source WAV.
+
+The remote backend checks the server UI before starting transcription. If the
+server cannot be reached, WAV recording continues and the app reports the
+transcription startup failure.
+
 ### Local Hungarian transcription
 
-Local Whisper is the default backend. SliceTranscribe uses the multilingual
-Whisper `base` model on the CPU and forces language `hu`.
+Local Whisper remains available as a fallback backend. SliceTranscribe uses
+the multilingual Whisper `base` model on the CPU and forces language `hu`.
 
 The model is downloaded only once and stored outside the repository:
 
