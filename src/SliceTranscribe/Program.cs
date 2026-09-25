@@ -747,9 +747,9 @@ Default transcription backend:
       whisper.cpp HTTP server at http://192.168.1.2:8765
       Intended for full large-v3 on the RTX 3090 home PC.
       Defaults to microphone channel 0 and 12-second live chunks.
-      Finalization re-transcribes every available microphone channel in
-      12-second windows, compares the six hypotheses, and keeps the strongest
-      consensus per window. Speaker diarization defaults to:
+      The HP B&O endpoint exposes six bit-identical capture channels, so final
+      transcription uses channel 0 only in 12-second windows. Speaker
+      diarization defaults to:
       http://192.168.1.2:8766
 
 Optional backends:
