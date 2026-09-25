@@ -16,6 +16,37 @@ try
         return 0;
     }
 
+    if (command == "phone")
+    {
+        string phoneCommand =
+            args.Length >= 2
+                ? args[1].ToLowerInvariant()
+                : "list";
+
+        if (phoneCommand == "list")
+        {
+            return await PhoneAudioProbe.ListAsync();
+        }
+
+        if (phoneCommand == "connect")
+        {
+            string? phoneName =
+                ReadOption(
+                    args,
+                    "--name");
+
+            using var phoneCts =
+                new CancellationTokenSource();
+
+            return await PhoneAudioProbe.ConnectAsync(
+                phoneName,
+                phoneCts.Token);
+        }
+
+        throw new ArgumentException(
+            "phone must be 'list' or 'connect'.");
+    }
+
     if (command == "model")
     {
         string downloadedModelPath =
@@ -846,6 +877,9 @@ Usage:
   SliceTranscribe finalize "C:\path\recording.wav"
   SliceTranscribe finalize "C:\path\recording.wav" --no-diarization
   SliceTranscribe mics
+  SliceTranscribe phone list
+  SliceTranscribe phone connect
+  SliceTranscribe phone connect --name "device name"
 
 Default transcription backend:
 
