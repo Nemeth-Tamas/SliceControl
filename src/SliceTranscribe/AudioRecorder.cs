@@ -94,6 +94,11 @@ internal sealed class AudioRecorder :
 
             try
             {
+                PhoneAudioSessionController.RequestMuteAsync(
+                    "recording")
+                    .GetAwaiter()
+                    .GetResult();
+
                 _capture.StartRecording();
             }
             catch
