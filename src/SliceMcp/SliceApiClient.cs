@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace SliceMcp;
 
-internal sealed class SliceApiClient
+public sealed class SliceApiClient
 {
     private readonly HttpClient _http;
 
