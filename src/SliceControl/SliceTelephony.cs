@@ -42,6 +42,27 @@ public sealed class SliceTelephony
     public void SendMuteOffReport() =>
         _raw.SendCollection01(0x42, 0x00);
 
+    /// <summary>
+    /// Clears the observed muted/red theme and resumes the requested active state.
+    /// The tested HP driver requires leaving the active 0x20/0x22 state first;
+    /// sending 42 00 while active does not visibly clear the latched theme.
+    /// </summary>
+    public void ClearMuteTheme(SliceTelephonyState resumeState)
+    {
+        if (resumeState is not (
+            SliceTelephonyState.ActiveDelayedExit or
+            SliceTelephonyState.ActiveImmediateExit))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(resumeState),
+                "Resume state must be an active call state.");
+        }
+
+        EnterCall();
+        SendMuteOffReport();
+        SetState(resumeState);
+    }
+
     public void SendStateReport(byte value) =>
         _raw.SendCollection01(0x41, value);
 
