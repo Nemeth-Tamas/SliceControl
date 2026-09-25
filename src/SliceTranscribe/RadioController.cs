@@ -27,6 +27,40 @@ internal static class RadioController
         Stopped
     }
 
+
+    public static async Task ResetAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await Gate.WaitAsync(
+            cancellationToken);
+
+        try
+        {
+            PauseReasons.Clear();
+
+            bool unmuted =
+                await SetRadioSessionMutedAsync(
+                    muted: false,
+                    cancellationToken);
+
+            if (!unmuted)
+            {
+                Console.Error.WriteLine(
+                    "RADIO -> startup reset could not find VLC audio session");
+            }
+
+            await RecoverTransportIfNeededAsync(
+                cancellationToken);
+
+            Console.WriteLine(
+                "RADIO -> startup state reset");
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
     public static async Task<bool> RequestPauseAsync(
         string reason,
         CancellationToken cancellationToken = default)
