@@ -100,7 +100,7 @@ public sealed class SliceDevice
         if (Paths.Collection05 is not null)
         {
             tasks.Add(
-                WatchRawCollectionAsync(
+                WatchOptionalRawCollectionAsync(
                     Paths.Collection05,
                     5,
                     callback,
@@ -211,6 +211,29 @@ public sealed class SliceDevice
                 callback);
 
             previous = current;
+        }
+    }
+
+    private static async Task WatchOptionalRawCollectionAsync(
+        string path,
+        int collection,
+        Action<SliceRawInputReport> callback,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await WatchRawCollectionAsync(
+                path,
+                collection,
+                callback,
+                cancellationToken);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Some Windows HID keyboard collections are present in enumeration
+            // but cannot be opened for generic user-mode reads. Collection 05 is
+            // optional reverse-engineering input, so do not terminate monitoring
+            // of the confirmed telephony/consumer collections when this occurs.
         }
     }
 
