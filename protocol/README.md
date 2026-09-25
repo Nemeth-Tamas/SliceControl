@@ -149,7 +149,11 @@ Observed behavior:
 - In the muted theme, the perimeter breathes red and the yellow mute indicator is illuminated.
 - Entering the `41 04` attention state temporarily overrides the muted presentation with green blinking.
 - Returning from attention to the prior active state restores the red/muted presentation, demonstrating that the mute/theme state remains latched underneath the attention renderer.
-- `42 00` did not visibly restore the normal green theme in testing, even when followed by an attention-state round trip. It is therefore exposed by SliceControl as an experimental/raw-compatible operation rather than documented as a guaranteed visual unmute.
+- `42 00` sent while an active `41 20` / `41 22` breathing state is being rendered does not visibly clear the red/muted presentation.
+- A confirmed visual unmute is achieved by first leaving the active state with `41 02`, then sending a single `42 00`, then re-entering an active state such as `41 22`.
+- The confirmed sequence `41 02 -> 42 00 -> 41 22` produces red breathing -> red steady -> green breathing.
+- One `42 00` is sufficient in that sequence. An earlier hypothesis that two zero reports were required was disproved by hardware testing.
+- Repeating the same clear sequence once already green produces no further visible change.
 
 ---
 
@@ -278,6 +282,18 @@ This separation is important: lifecycle state and visual mute theme are not
 the same thing. During a muted active call, entering `41 04` produces green
 blinking, then returning to the active lifecycle state restores the red/yellow
 muted presentation.
+
+A confirmed visual unmute requires a lifecycle transition out of the active
+breathing state before the mute-off report is applied:
+
+```text
+41 02
+42 00
+41 22
+```
+
+On tested hardware this changes red breathing -> red steady -> green breathing.
+A single `42 00` is sufficient in this context.
 
 ---
 
