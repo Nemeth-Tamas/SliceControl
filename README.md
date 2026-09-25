@@ -166,9 +166,28 @@ slice.Telephony.EnableMuteTheme();
 yellow mute theme. The attention state temporarily renders green, then the
 red/muted presentation returns when the active state is restored.
 
-`SendMuteOffReport()` sends `42 00`, but on the tested hardware this did not
-visibly restore the normal green presentation, so it should currently be
-treated as experimental behavior rather than a guaranteed visual unmute.
+`SendMuteOffReport()` sends the raw `42 00` report. While an active
+`41 20` / `41 22` state is being rendered, that report alone does not visibly
+clear the latched red/muted theme.
+
+The confirmed unmute sequence is:
+
+```csharp
+slice.Telephony.ClearMuteTheme(
+    SliceTelephonyState.ActiveImmediateExit);
+```
+
+Internally this performs:
+
+```text
+41 02
+42 00
+41 22
+```
+
+A single `42 00` is sufficient once the driver has first been moved out of the
+active breathing state. The earlier two-zero hypothesis was disproved by
+hardware testing.
 
 Raw state reports remain available:
 
