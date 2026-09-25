@@ -3,7 +3,7 @@ using NAudio.Wave;
 namespace SliceTranscribe;
 
 internal sealed class LiveTranscriptionController :
-    IAsyncDisposable
+    ITranscriptionController
 {
     private readonly object _gate =
         new();
