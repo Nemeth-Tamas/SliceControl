@@ -173,16 +173,6 @@ internal sealed class RemoteControlServer :
 
             if (path == "/ws/talk")
             {
-                if (!IsAuthorized(
-                    context.Request))
-                {
-                    context.Response.StatusCode =
-                        401;
-
-                    context.Response.Close();
-                    return;
-                }
-
                 await HandleTalkWebSocketAsync(
                     context,
                     cancellationToken);
