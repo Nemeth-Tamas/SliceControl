@@ -27,7 +27,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "SliceTranscribe Release build failed."
 }
 
-$exe = Join-Path $repoRoot "src\SliceTranscribe\bin\Release\net8.0-windows\SliceTranscribe.exe"
+$exe = Join-Path $repoRoot "src\SliceTranscribe\bin\Release\net8.0-windows10.0.19041.0\SliceTranscribe.exe"
 $radioScript = Join-Path $PSScriptRoot "Start-RetroRadio.ps1"
 $transcribeScript = Join-Path $PSScriptRoot "Start-SliceTranscribe.ps1"
 
