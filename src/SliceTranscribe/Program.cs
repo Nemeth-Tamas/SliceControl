@@ -388,6 +388,9 @@ try
                     Console.WriteLine(
                         $"Saved: {saved}");
                 }
+
+                await RadioController.PlayAsync(
+                    CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -507,8 +510,34 @@ static async Task RunButtonLoopAsync(
                     break;
                 }
 
-                string path =
-                    recorder.Start();
+                bool radioPaused =
+                    await RadioController.PauseAsync(
+                        cancellationToken);
+
+                if (radioPaused)
+                {
+                    await Task.Delay(
+                        100,
+                        cancellationToken);
+                }
+
+                string path;
+
+                try
+                {
+                    path =
+                        recorder.Start();
+                }
+                catch
+                {
+                    if (radioPaused)
+                    {
+                        await RadioController.PlayAsync(
+                            CancellationToken.None);
+                    }
+
+                    throw;
+                }
 
                 slice.Lights.EnterCallAnimation();
 
@@ -563,6 +592,9 @@ static async Task RunButtonLoopAsync(
                         cancellationToken);
 
                 slice.Lights.ExitAnimation();
+
+                await RadioController.PlayAsync(
+                    cancellationToken);
 
                 string? transcript =
                     null;
