@@ -167,6 +167,32 @@ if (-not $NoStart) {
     Write-Host ("  Slice Retro Radio: {0} (LastTaskResult {1})" -f $radioState, $radioTask.LastTaskResult)
     Write-Host ("  Slice MCP: {0} (LastTaskResult {1})" -f $mcpState, $mcpTask.LastTaskResult)
 
+    Start-Sleep -Seconds 1
+
+    $mcpListener = Get-NetTCPConnection -LocalPort $mcpPort -State Listen -ErrorAction SilentlyContinue
+
+    if ($null -eq $mcpListener) {
+        Write-Warning "Slice MCP is not listening on TCP $mcpPort."
+
+        $mcpErrorLog = Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs\SliceMcp-error.log"
+        $mcpOutputLog = Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs\SliceMcp.log"
+
+        if (Test-Path $mcpErrorLog) {
+            Write-Host
+            Write-Host "Last Slice MCP errors:"
+            Get-Content $mcpErrorLog -Tail 30 | ForEach-Object { Write-Host ("  " + $_) }
+        }
+
+        if (Test-Path $mcpOutputLog) {
+            Write-Host
+            Write-Host "Last Slice MCP output:"
+            Get-Content $mcpOutputLog -Tail 20 | ForEach-Object { Write-Host ("  " + $_) }
+        }
+    }
+    else {
+        Write-Host ("  Slice MCP listener: TCP {0} OK" -f $mcpPort)
+    }
+
     $announcementPath = Join-Path ([Environment]::GetFolderPath("MyDocuments")) "SliceTranscribe\Announcements"
 
     Write-Host
