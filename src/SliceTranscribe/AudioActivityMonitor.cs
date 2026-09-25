@@ -1,12 +1,11 @@
 using NAudio.CoreAudioApi;
-using System.Diagnostics;
 
 namespace SliceTranscribe;
 
 internal sealed class AudioActivityMonitor
 {
     private const string RadioPauseReason =
-        "external-audio";
+        "phone-media";
 
     private const float ActivityThreshold =
         0.003f;
@@ -37,14 +36,11 @@ internal sealed class AudioActivityMonitor
         DateTimeOffset lastRefresh =
             DateTimeOffset.MinValue;
 
-        DateTimeOffset? lastExternalAudio =
+        DateTimeOffset? lastPhoneAudio =
             null;
 
         bool holdingRadio =
             false;
-
-        string? activeSource =
-            null;
 
         try
         {
@@ -63,14 +59,14 @@ internal sealed class AudioActivityMonitor
                 }
 
                 bool active =
-                    TryFindExternalAudio(
+                    TryFindPhoneA2dpAudio(
                         manager.Sessions,
                         out string? source,
                         out float peak);
 
                 if (active)
                 {
-                    lastExternalAudio =
+                    lastPhoneAudio =
                         now;
 
                     if (!holdingRadio)
@@ -82,29 +78,15 @@ internal sealed class AudioActivityMonitor
 
                         if (holdingRadio)
                         {
-                            activeSource =
-                                source;
-
                             Console.WriteLine(
-                                $"AUDIO PRIORITY -> {source} ({peak:P1})");
+                                $"PHONE MEDIA ACTIVE -> {source} ({peak:P1})");
                         }
-                    }
-                    else if (!string.Equals(
-                        activeSource,
-                        source,
-                        StringComparison.OrdinalIgnoreCase))
-                    {
-                        activeSource =
-                            source;
-
-                        Console.WriteLine(
-                            $"AUDIO PRIORITY -> {source} ({peak:P1})");
                     }
                 }
                 else if (
                     holdingRadio &&
-                    lastExternalAudio is not null &&
-                    now - lastExternalAudio.Value >=
+                    lastPhoneAudio is not null &&
+                    now - lastPhoneAudio.Value >=
                         _resumeDelay)
                 {
                     await RadioController.ReleasePauseAsync(
@@ -114,10 +96,7 @@ internal sealed class AudioActivityMonitor
                     holdingRadio =
                         false;
 
-                    activeSource =
-                        null;
-
-                    lastExternalAudio =
+                    lastPhoneAudio =
                         null;
                 }
 
@@ -147,7 +126,7 @@ internal sealed class AudioActivityMonitor
         }
     }
 
-    private static bool TryFindExternalAudio(
+    private static bool TryFindPhoneA2dpAudio(
         SessionCollection sessions,
         out string? source,
         out float peak)
@@ -167,26 +146,22 @@ internal sealed class AudioActivityMonitor
                 using AudioSessionControl session =
                     sessions[i];
 
+                string displayName =
+                    session.DisplayName ??
+                    string.Empty;
+
+                if (!displayName.Contains(
+                    "A2DP SNK",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 float sessionPeak =
                     session.AudioMeterInformation.MasterPeakValue;
 
                 if (sessionPeak <
                     ActivityThreshold)
-                {
-                    continue;
-                }
-
-                uint processId =
-                    session.GetProcessID;
-
-                string processName =
-                    GetProcessName(
-                        processId);
-
-                if (string.Equals(
-                    processName,
-                    "vlc",
-                    StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -201,10 +176,7 @@ internal sealed class AudioActivityMonitor
                     sessionPeak;
 
                 source =
-                    DescribeSession(
-                        session,
-                        processId,
-                        processName);
+                    displayName;
             }
             catch
             {
@@ -213,53 +185,5 @@ internal sealed class AudioActivityMonitor
         }
 
         return source is not null;
-    }
-
-    private static string DescribeSession(
-        AudioSessionControl session,
-        uint processId,
-        string processName)
-    {
-        string displayName =
-            string.Empty;
-
-        try
-        {
-            displayName =
-                session.DisplayName;
-        }
-        catch
-        {
-        }
-
-        if (!string.IsNullOrWhiteSpace(
-            displayName))
-        {
-            return $"{displayName} / {processName} ({processId})";
-        }
-
-        return $"{processName} ({processId})";
-    }
-
-    private static string GetProcessName(
-        uint processId)
-    {
-        if (processId == 0)
-        {
-            return "Windows audio";
-        }
-
-        try
-        {
-            using Process process =
-                Process.GetProcessById(
-                    checked((int)processId));
-
-            return process.ProcessName;
-        }
-        catch
-        {
-            return $"PID {processId}";
-        }
     }
 }
