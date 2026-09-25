@@ -92,6 +92,10 @@ internal sealed class RemoteControlServer :
             Console.WriteLine(
                 $"REMOTE -> announcements {_announcementDirectory}");
 
+            Task indicatorTask =
+                MaintainIndicatorAsync(
+                    cancellationToken);
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 HttpListenerContext context;
@@ -959,6 +963,33 @@ internal sealed class RemoteControlServer :
         await RadioController.ReleasePauseAsync(
             reason,
             CancellationToken.None);
+    }
+
+    private async Task MaintainIndicatorAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (
+                    Volatile.Read(
+                        ref _monitorCount) > 0 ||
+                    _talkActive ||
+                    _announcementActive)
+                {
+                    RefreshIndicator();
+                }
+
+                await Task.Delay(
+                    750,
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+        }
     }
 
     private void RefreshIndicator()
