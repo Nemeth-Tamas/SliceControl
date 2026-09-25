@@ -294,6 +294,12 @@ try
                 new DisabledTranscriptionController()
         };
 
+    var recording =
+        new RecordingCoordinator(
+            slice,
+            recorder,
+            transcription);
+
     using var cts =
         new CancellationTokenSource();
 
@@ -431,8 +437,7 @@ try
 
         await RunButtonLoopAsync(
             slice,
-            recorder,
-            transcription,
+            recording,
             buttonEvents.Reader,
             cts.Token);
     }
@@ -444,46 +449,7 @@ try
     {
         cts.Cancel();
 
-        if (recorder.IsRecording)
-        {
-            try
-            {
-                string? saved =
-                    await recorder.StopAsync();
-
-                if (saved is not null)
-                {
-                    Console.WriteLine(
-                        $"Saved: {saved}");
-                }
-
-                await RadioController.ReleasePauseAsync(
-                    "recording",
-                    CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"Could not finalize recording: {ex.Message}");
-            }
-        }
-
-        try
-        {
-            string? transcript =
-                await transcription.FinishAsync();
-
-            if (transcript is not null)
-            {
-                Console.WriteLine(
-                    $"Transcript: {transcript}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(
-                $"Could not finalize transcription: {ex.Message}");
-        }
+        await recording.StopForShutdownAsync();
 
         try
         {
@@ -590,14 +556,10 @@ static async Task PumpButtonsAsync(
 
 static async Task RunButtonLoopAsync(
     SliceDevice slice,
-    AudioRecorder recorder,
-    ITranscriptionController transcription,
+    RecordingCoordinator recording,
     ChannelReader<SlicePhysicalButtonEvent> reader,
     CancellationToken cancellationToken)
 {
-    bool radioPausedByRecording =
-        false;
-
     await foreach (
         SlicePhysicalButtonEvent ev
         in reader.ReadAllAsync(
@@ -606,88 +568,21 @@ static async Task RunButtonLoopAsync(
         switch (ev.Button)
         {
             case SlicePhysicalButton.Pickup:
-                if (recorder.IsRecording)
+                if (recording.IsRecording)
                 {
                     Console.WriteLine(
                         "Already recording.");
-
-                    break;
                 }
-
-                radioPausedByRecording =
-                    await RadioController.RequestPauseAsync(
-                        "recording",
+                else
+                {
+                    await recording.StartAsync(
                         cancellationToken);
-
-                if (radioPausedByRecording)
-                {
-                    await Task.Delay(
-                        100,
-                        cancellationToken);
-                }
-
-                string path;
-
-                try
-                {
-                    path =
-                        recorder.Start();
-                }
-                catch
-                {
-                    if (radioPausedByRecording)
-                    {
-                        await RadioController.ReleasePauseAsync(
-                            "recording",
-                            CancellationToken.None);
-
-                        radioPausedByRecording =
-                            false;
-                    }
-
-                    throw;
-                }
-
-                slice.Lights.EnterCallAnimation();
-
-                await Task.Delay(
-                    120,
-                    cancellationToken);
-
-                slice.Lights.ShowActiveCall();
-
-                Console.WriteLine(
-                    $"RECORDING -> {path}");
-
-                Console.WriteLine(
-                    $"CAPTURE -> {recorder.CaptureFormat}");
-
-                if (transcription.Enabled)
-                {
-                    try
-                    {
-                        string? transcriptPath =
-                            await transcription.StartAsync(
-                                path,
-                                cancellationToken);
-
-                        Console.WriteLine(
-                            $"TRANSCRIBING -> {transcriptPath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine(
-                            $"Could not start transcription: {ex.Message}");
-
-                        Console.Error.WriteLine(
-                            "Recording will continue without transcription.");
-                    }
                 }
 
                 break;
 
             case SlicePhysicalButton.Hangup:
-                if (!recorder.IsRecording)
+                if (!recording.IsRecording)
                 {
                     bool quietMode =
                         SystemAudioController.ToggleMute();
@@ -708,84 +603,25 @@ static async Task RunButtonLoopAsync(
                     }
 
                     slice.Lights.Reset();
-                    break;
                 }
-
-                string? saved =
-                    await recorder.StopAsync(
+                else
+                {
+                    await recording.StopAsync(
                         cancellationToken);
-
-                slice.Lights.ExitAnimation();
-
-                if (radioPausedByRecording)
-                {
-                    await RadioController.ReleasePauseAsync(
-                        "recording",
-                        cancellationToken);
-
-                    radioPausedByRecording =
-                        false;
-                }
-
-                string? transcript =
-                    null;
-
-                try
-                {
-                    transcript =
-                        await transcription.FinishAsync(
-                            cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine(
-                        $"Could not finalize transcription: {ex.Message}");
-                }
-
-                Console.WriteLine();
-                Console.WriteLine(
-                    $"SAVED -> {saved}");
-
-                if (transcript is not null)
-                {
-                    Console.WriteLine(
-                        $"TRANSCRIPT -> {transcript}");
                 }
 
                 break;
 
             case SlicePhysicalButton.Mute:
-                if (!recorder.IsRecording)
+                if (!recording.IsRecording)
                 {
                     Console.WriteLine(
                         "Mute ignored while idle.");
-
-                    break;
-                }
-
-                bool paused =
-                    recorder.TogglePause();
-
-                if (paused)
-                {
-                    slice.Lights.ShowActiveMutedCall();
-
-                    Console.WriteLine(
-                        "PAUSED");
-
-                    if (transcription.Enabled)
-                    {
-                        _ =
-                            CommitTranscriptSegmentAsync(
-                                transcription);
-                    }
                 }
                 else
                 {
-                    slice.Lights.ShowActiveCall();
-
-                    Console.WriteLine(
-                        "RECORDING");
+                    await recording.TogglePauseAsync(
+                        cancellationToken);
                 }
 
                 break;
@@ -794,7 +630,7 @@ static async Task RunButtonLoopAsync(
             case SlicePhysicalButton.VolumeUp:
                 await ShowVolumeFeedbackAsync(
                     slice,
-                    recorder,
+                    recording,
                     ev.Button,
                     cancellationToken);
                 break;
@@ -809,15 +645,15 @@ static async Task RunButtonLoopAsync(
 
 static async Task ShowVolumeFeedbackAsync(
     SliceDevice slice,
-    AudioRecorder recorder,
+    RecordingCoordinator recording,
     SlicePhysicalButton button,
     CancellationToken cancellationToken)
 {
     int volume = GetMasterPlaybackVolumePercent();
 
-    if (recorder.IsRecording)
+    if (recording.IsRecording)
     {
-        if (recorder.IsPaused)
+        if (recording.IsPaused)
         {
             slice.Lights.SetMutedCall(volume);
         }
@@ -838,9 +674,9 @@ static async Task ShowVolumeFeedbackAsync(
         700,
         cancellationToken);
 
-    if (recorder.IsRecording)
+    if (recording.IsRecording)
     {
-        if (recorder.IsPaused)
+        if (recording.IsPaused)
         {
             slice.Lights.ShowActiveMutedCall();
         }
@@ -868,20 +704,6 @@ static int GetMasterPlaybackVolumePercent()
     return (int)Math.Round(
         endpoint.AudioEndpointVolume.MasterVolumeLevelScalar *
         100.0f);
-}
-
-static async Task CommitTranscriptSegmentAsync(
-    ITranscriptionController transcription)
-{
-    try
-    {
-        await transcription.CommitAsync();
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine(
-            $"Could not finalize transcript segment: {ex.Message}");
-    }
 }
 
 static string FormatEvidence(
