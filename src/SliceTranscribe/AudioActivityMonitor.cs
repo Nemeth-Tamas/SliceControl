@@ -69,6 +69,12 @@ internal sealed class AudioActivityMonitor
                     lastPhoneAudio =
                         now;
 
+                    if (PhoneAudioSessionController.IsMuteRequested)
+                    {
+                        await PhoneAudioSessionController.EnsureMuteAppliedAsync(
+                            cancellationToken);
+                    }
+
                     if (!holdingRadio)
                     {
                         holdingRadio =
