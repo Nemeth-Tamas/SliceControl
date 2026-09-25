@@ -2,10 +2,8 @@ using NAudio.CoreAudioApi;
 using NAudio.MediaFoundation;
 using NAudio.Wave;
 using SliceControl;
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.WebSockets;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -15,6 +13,9 @@ internal sealed class RemoteControlServer :
     IAsyncDisposable
 {
     private const int PcmSampleRate = 48000;
+
+    public const string WireGuardAddress =
+        "10.10.10.12";
 
     private readonly SliceDevice _slice;
     private readonly RecordingCoordinator _recording;
@@ -29,7 +30,6 @@ internal sealed class RemoteControlServer :
     private readonly object _indicatorGate =
         new();
 
-    private readonly string _token;
     private readonly string _announcementDirectory;
 
     private CancellationTokenSource? _announcementCts;
@@ -48,9 +48,6 @@ internal sealed class RemoteControlServer :
         _recording =
             recording;
 
-        _token =
-            LoadOrCreateToken();
-
         _announcementDirectory =
             Path.Combine(
                 Environment.GetFolderPath(
@@ -62,16 +59,16 @@ internal sealed class RemoteControlServer :
             _announcementDirectory);
 
         _listener.Prefixes.Add(
-            $"http://+:{port}/");
+            $"http://127.0.0.1:{port}/");
+
+        _listener.Prefixes.Add(
+            $"http://{WireGuardAddress}:{port}/");
 
         Port =
             port;
     }
 
     public int Port { get; }
-
-    public string Token =>
-        _token;
 
     public string AnnouncementDirectory =>
         _announcementDirectory;
@@ -84,10 +81,10 @@ internal sealed class RemoteControlServer :
             _listener.Start();
 
             Console.WriteLine(
-                $"REMOTE -> listening on http://0.0.0.0:{Port}/");
+                $"REMOTE -> listening on http://{WireGuardAddress}:{Port}/");
 
             Console.WriteLine(
-                $"REMOTE -> token {_token}");
+                $"REMOTE -> loopback control on http://127.0.0.1:{Port}/");
 
             Console.WriteLine(
                 $"REMOTE -> announcements {_announcementDirectory}");
@@ -167,16 +164,6 @@ internal sealed class RemoteControlServer :
 
             if (path == "/ws/monitor")
             {
-                if (!IsAuthorized(
-                    context.Request))
-                {
-                    context.Response.StatusCode =
-                        401;
-
-                    context.Response.Close();
-                    return;
-                }
-
                 await HandleMonitorWebSocketAsync(
                     context,
                     cancellationToken);
@@ -199,21 +186,6 @@ internal sealed class RemoteControlServer :
                 await HandleTalkWebSocketAsync(
                     context,
                     cancellationToken);
-
-                return;
-            }
-
-            if (!IsAuthorized(
-                context.Request))
-            {
-                await WriteJsonAsync(
-                    context.Response,
-                    401,
-                    new
-                    {
-                        error =
-                            "Invalid or missing remote-control token."
-                    });
 
                 return;
             }
@@ -1028,36 +1000,6 @@ internal sealed class RemoteControlServer :
         }
     }
 
-    private bool IsAuthorized(
-        HttpListenerRequest request)
-    {
-        string? supplied =
-            request.Headers[
-                "X-Slice-Token"]
-            ?? request.QueryString[
-                "token"];
-
-        if (string.IsNullOrWhiteSpace(
-            supplied))
-        {
-            return false;
-        }
-
-        byte[] left =
-            Encoding.UTF8.GetBytes(
-                supplied);
-
-        byte[] right =
-            Encoding.UTF8.GetBytes(
-                _token);
-
-        return left.Length ==
-                   right.Length &&
-               CryptographicOperations.FixedTimeEquals(
-                   left,
-                   right);
-    }
-
     private static async Task SendBinaryAsync(
         WebSocket socket,
         SemaphoreSlim gate,
@@ -1330,49 +1272,6 @@ internal sealed class RemoteControlServer :
         response.Close();
     }
 
-    private static string LoadOrCreateToken()
-    {
-        string directory =
-            Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder.LocalApplicationData),
-                "SliceAppliance");
-
-        Directory.CreateDirectory(
-            directory);
-
-        string path =
-            Path.Combine(
-                directory,
-                "remote-token.txt");
-
-        if (File.Exists(
-            path))
-        {
-            string existing =
-                File.ReadAllText(
-                    path)
-                    .Trim();
-
-            if (!string.IsNullOrWhiteSpace(
-                existing))
-            {
-                return existing;
-            }
-        }
-
-        string token =
-            Convert.ToHexString(
-                RandomNumberGenerator.GetBytes(
-                    24));
-
-        File.WriteAllText(
-            path,
-            token);
-
-        return token;
-    }
-
     public ValueTask DisposeAsync()
     {
         try
@@ -1415,14 +1314,6 @@ button.danger{background:#652d2d}
 <main>
 <h1>Slice Control</h1>
 <div class="card">
-<div class="row">
-<input id="token" type="password" placeholder="Remote token" style="flex:1">
-<button onclick="saveToken()">Save token</button>
-</div>
-<div class="small">Token is stored only in this browser.</div>
-</div>
-
-<div class="card">
 <h2>Status</h2>
 <div id="status">Connecting…</div>
 </div>
@@ -1463,25 +1354,16 @@ let monitorSocket=null, monitorContext=null, nextPlay=0, monitorSampleRate=48000
 let talkSocket=null, talkContext=null, talkStream=null, talkProcessor=null;
 let lastMics='';
 
-const tokenBox=document.getElementById('token');
-tokenBox.value=localStorage.getItem('sliceToken')||'';
-
 if(!window.isSecureContext){
   document.getElementById('talkHint').textContent=
     'Talk needs HTTPS because browsers block microphone access on remote HTTP pages. Listen/record/announcements still work.';
 }
 
-function saveToken(){
-  localStorage.setItem('sliceToken',tokenBox.value.trim());
-  refresh();
-}
-function token(){ return tokenBox.value.trim(); }
 function wsUrl(path){
   const proto=location.protocol==='https:'?'wss:':'ws:';
   return proto+'//'+location.host+path;
 }
 async function api(path,options={}){
-  options.headers=Object.assign({},options.headers||{}, {'X-Slice-Token':token()});
   const r=await fetch(path,options);
   const data=await r.json().catch(()=>({}));
   if(!r.ok) throw new Error(data.error||('HTTP '+r.status));
@@ -1523,7 +1405,7 @@ async function refresh(){
       box.appendChild(b);
     }
   }catch(e){
-    document.getElementById('status').textContent='Offline / unauthorized: '+e.message;
+    document.getElementById('status').textContent='Offline: '+e.message;
   }
 }
 setInterval(refresh,1500);
@@ -1535,7 +1417,7 @@ async function toggleListen(){
     const mic=document.getElementById('mic').value;
     monitorContext=new AudioContext({sampleRate:48000});
     nextPlay=monitorContext.currentTime+0.08;
-    monitorSocket=new WebSocket(wsUrl('/ws/monitor?token='+encodeURIComponent(token())+'&mic='+encodeURIComponent(mic)));
+    monitorSocket=new WebSocket(wsUrl('/ws/monitor?mic='+encodeURIComponent(mic)));
     monitorSocket.binaryType='arraybuffer';
     monitorSocket.onmessage=e=>{
       if(typeof e.data==='string'){
@@ -1603,7 +1485,7 @@ async function toggleTalk(){
     const silent=talkContext.createGain(); silent.gain.value=0;
     source.connect(talkProcessor); talkProcessor.connect(silent); silent.connect(talkContext.destination);
 
-    talkSocket=new WebSocket(wsUrl('/ws/talk?token='+encodeURIComponent(token())));
+    talkSocket=new WebSocket(wsUrl('/ws/talk'));
     talkSocket.binaryType='arraybuffer';
     talkProcessor.onaudioprocess=e=>{
       if(!talkSocket||talkSocket.readyState!==WebSocket.OPEN) return;
