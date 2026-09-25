@@ -19,15 +19,20 @@ if ($LASTEXITCODE -ne 0) {
 
 $exe = Join-Path $repoRoot "src\SliceTranscribe\bin\Release\net8.0-windows\SliceTranscribe.exe"
 $radioScript = Join-Path $PSScriptRoot "Start-RetroRadio.ps1"
+$transcribeScript = Join-Path $PSScriptRoot "Start-SliceTranscribe.ps1"
 
 if (-not (Test-Path $exe)) {
     throw "SliceTranscribe executable was not found at $exe"
 }
 
-$transcribeArgs = 'run --mic "{0}" --remote-url "{1}" --diarization-url "{2}"' -f $Mic, $WhisperUrl, $DiarizationUrl
-$radioArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $radioScript
+if (-not (Test-Path $transcribeScript)) {
+    throw "SliceTranscribe launcher was not found at $transcribeScript"
+}
 
-$transcribeAction = New-ScheduledTaskAction -Execute $exe -Argument $transcribeArgs -WorkingDirectory (Split-Path -Parent $exe)
+$transcribeArgs = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -Mic "{1}" -WhisperUrl "{2}" -DiarizationUrl "{3}"' -f $transcribeScript, $Mic, $WhisperUrl, $DiarizationUrl
+$radioArgs = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $radioScript
+
+$transcribeAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $transcribeArgs -WorkingDirectory $PSScriptRoot
 $radioAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $radioArgs -WorkingDirectory $PSScriptRoot
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
@@ -53,6 +58,17 @@ if (-not $NoStart) {
     Stop-ScheduledTask -TaskName "SliceTranscribe" -ErrorAction SilentlyContinue
     Stop-ScheduledTask -TaskName "Slice Retro Radio" -ErrorAction SilentlyContinue
 
+    Get-Process -Name "SliceTranscribe" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    # The pre-RC radio launcher did not track its VLC PID. Stop any old VLC
+    # instance once during installation so the newly controlled radio owns
+    # localhost:4212 cleanly.
+    Get-Process -Name "vlc" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    Start-Sleep -Milliseconds 300
+
     Start-ScheduledTask -TaskName "SliceTranscribe"
     Start-ScheduledTask -TaskName "Slice Retro Radio"
 
@@ -61,8 +77,12 @@ if (-not $NoStart) {
     $transcribeTask = Get-ScheduledTaskInfo -TaskName "SliceTranscribe"
     $radioTask = Get-ScheduledTaskInfo -TaskName "Slice Retro Radio"
 
-    Write-Host ("  SliceTranscribe LastTaskResult: {0}" -f $transcribeTask.LastTaskResult)
-    Write-Host ("  Slice Retro Radio LastTaskResult: {0}" -f $radioTask.LastTaskResult)
+    $transcribeState = (Get-ScheduledTask -TaskName "SliceTranscribe").State
+    $radioState = (Get-ScheduledTask -TaskName "Slice Retro Radio").State
+
+    Write-Host ("  SliceTranscribe: {0} (LastTaskResult {1})" -f $transcribeState, $transcribeTask.LastTaskResult)
+    Write-Host ("  Slice Retro Radio: {0} (LastTaskResult {1})" -f $radioState, $radioTask.LastTaskResult)
+    Write-Host ("  SliceTranscribe logs: {0}" -f (Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs"))
 }
 
 Write-Host
