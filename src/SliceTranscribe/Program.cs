@@ -149,7 +149,7 @@ try
 
         try
         {
-            slice.Telephony.EndCall();
+            slice.Lights.Reset();
         }
         catch
         {
@@ -253,13 +253,13 @@ static async Task RunButtonLoopAsync(
                 Console.WriteLine(
                     $"RECORDING -> {path}");
 
-                slice.Telephony.EnterCall();
+                slice.Lights.EnterCallAnimation();
 
                 await Task.Delay(
                     120,
                     cancellationToken);
 
-                slice.Telephony.ActiveImmediateExit();
+                slice.Lights.ShowActiveCall();
                 break;
 
             case SlicePhysicalButton.Hangup:
@@ -268,7 +268,7 @@ static async Task RunButtonLoopAsync(
                     Console.WriteLine(
                         "Nothing to stop.");
 
-                    slice.Telephony.EndCall();
+                    slice.Lights.Reset();
                     break;
                 }
 
@@ -276,7 +276,7 @@ static async Task RunButtonLoopAsync(
                     await recorder.StopAsync(
                         cancellationToken);
 
-                slice.Telephony.EndCall();
+                slice.Lights.ExitAnimation();
 
                 Console.WriteLine(
                     $"SAVED -> {saved}");
@@ -297,16 +297,14 @@ static async Task RunButtonLoopAsync(
 
                 if (paused)
                 {
-                    slice.Telephony.ApplyMuteTheme(
-                        SliceTelephonyState.ActiveImmediateExit);
+                    slice.Lights.ShowActiveMutedCall();
 
                     Console.WriteLine(
                         "PAUSED");
                 }
                 else
                 {
-                    slice.Telephony.ClearMuteTheme(
-                        SliceTelephonyState.ActiveImmediateExit);
+                    slice.Lights.ShowActiveCall();
 
                     Console.WriteLine(
                         "RECORDING");
