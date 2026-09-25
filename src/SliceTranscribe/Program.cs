@@ -106,6 +106,24 @@ try
             "--remote-url")
         ?? defaultRemoteUrl;
 
+    int remoteChannel =
+        0;
+
+    string? remoteChannelText =
+        ReadOption(
+            args,
+            "--remote-channel");
+
+    if (remoteChannelText is not null &&
+        (!int.TryParse(
+            remoteChannelText,
+            out remoteChannel) ||
+         remoteChannel < 0))
+    {
+        throw new ArgumentException(
+            "--remote-channel must be zero or a positive integer.");
+    }
+
     string? modelPath =
         null;
 
@@ -152,7 +170,8 @@ try
             "remote" =>
                 new RemoteWhisperTranscriptionController(
                     recorder,
-                    remoteUrl),
+                    remoteUrl,
+                    remoteChannel),
 
             "local" =>
                 new LocalWhisperTranscriptionController(
@@ -215,10 +234,13 @@ try
         {
             case "remote":
                 Console.WriteLine(
-                    "Transcription: remote whisper.cpp / large-v3-turbo / Hungarian");
+                    "Transcription: remote whisper.cpp / large-v3 / Hungarian");
 
                 Console.WriteLine(
                     $"Server: {remoteUrl}");
+
+                Console.WriteLine(
+                    $"Microphone channel: {remoteChannel}");
 
                 break;
 
@@ -626,6 +648,7 @@ Usage:
 
   SliceTranscribe run --transcriber remote
   SliceTranscribe run --remote-url "http://192.168.1.2:8765"
+  SliceTranscribe run --remote-channel 0
   SliceTranscribe run --transcriber local
   SliceTranscribe run --transcriber openai
   SliceTranscribe run --transcriber none
@@ -641,7 +664,8 @@ Default transcription backend:
 
   remote
       whisper.cpp HTTP server at http://192.168.1.2:8765
-      Intended for large-v3-turbo on the RTX 3090 home PC.
+      Intended for full large-v3 on the RTX 3090 home PC.
+      Defaults to microphone channel 0 and 12-second live chunks.
 
 Optional backends:
 
@@ -659,8 +683,8 @@ Controls:
   Mute   -> pause/resume and flush the current local transcript chunk
   Hangup -> stop and finalize WAV + TXT transcript
 
-The original WAV remains the source-of-truth recording. The selected Whisper
-backend emits completed text roughly every six seconds and appends it to a
-UTF-8 .txt file beside the WAV.
+The original WAV remains the source-of-truth recording. The remote Whisper
+backend emits completed text roughly every twelve seconds; the local fallback
+still uses shorter chunks. Text is appended to a UTF-8 .txt file beside the WAV.
 """);
 }
