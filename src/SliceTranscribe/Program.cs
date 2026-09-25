@@ -297,7 +297,8 @@ static async Task RunButtonLoopAsync(
 
                 if (paused)
                 {
-                    slice.Telephony.EnableMuteTheme();
+                    slice.Telephony.ApplyMuteTheme(
+                        SliceTelephonyState.ActiveImmediateExit);
 
                     Console.WriteLine(
                         "PAUSED");
