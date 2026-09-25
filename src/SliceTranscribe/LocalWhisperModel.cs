@@ -62,22 +62,28 @@ internal static class LocalWhisperModel
                     .GetGgmlModelAsync(
                         GgmlType.Base);
 
-            await using var file =
-                new FileStream(
-                    partialPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    bufferSize: 1024 * 1024,
-                    useAsync: true);
+            await using (
+                var file =
+                    new FileStream(
+                        partialPath,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        bufferSize: 1024 * 1024,
+                        useAsync: true))
+            {
+                await modelStream.CopyToAsync(
+                    file,
+                    cancellationToken);
 
-            await modelStream.CopyToAsync(
-                file,
-                cancellationToken);
+                await file.FlushAsync(
+                    cancellationToken);
+            }
 
-            await file.FlushAsync(
-                cancellationToken);
-
+            // The download file must be closed before renaming it. A using
+            // declaration here would keep the FileStream alive until the end
+            // of the method and make File.Move fail on Windows with
+            // ERROR_SHARING_VIOLATION.
             File.Move(
                 partialPath,
                 path,
