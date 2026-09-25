@@ -191,6 +191,12 @@ Observed behavior:
 - The confirmed sequence `41 02 -> 42 00 -> 41 22` produces red breathing -> red steady -> green breathing.
 - One `42 00` is sufficient in that sequence. An earlier hypothesis that two zero reports were required was disproved by hardware testing.
 - Repeating the same clear sequence once already green produces no further visible change.
+- SliceTranscribe hardware testing showed that sending `42 01` alone while
+  `41 22` was already rendering left the visible LEDs green even though the
+  mute theme was latched. On the following lifecycle transition the red/yellow
+  theme appeared.
+- Reliable immediate theme changes therefore use
+  `41 02 -> short delay -> 42 01/00 -> short delay -> 41 22`.
 
 ---
 
