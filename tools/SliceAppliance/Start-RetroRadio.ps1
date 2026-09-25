@@ -92,15 +92,17 @@ Write-Host "Retro Radio backup : $BackupStream"
 
 $arguments = @(
     "--no-one-instance",
-    "--no-video",
-    "--qt-start-minimized",
+    "--intf=dummy",
     "--extraintf=rc",
     "--rc-host=127.0.0.1:4212",
+    "--no-video",
+    "--no-osd",
+    "--quiet",
     "--playlist-autostart",
     $playlistPath
 )
 
-$process = Start-Process -FilePath $vlc -ArgumentList $arguments -PassThru
+$process = Start-Process -FilePath $vlc -ArgumentList $arguments -WindowStyle Hidden -PassThru
 [System.IO.File]::WriteAllText(
     $pidPath,
     $process.Id.ToString(),
