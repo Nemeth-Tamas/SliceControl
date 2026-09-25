@@ -37,6 +37,17 @@ try
             "SliceTranscribe",
             "Recordings");
 
+    bool noTranscription =
+        HasFlag(
+            args,
+            "--no-transcribe");
+
+    string? apiKey =
+        noTranscription
+            ? null
+            : Environment.GetEnvironmentVariable(
+                "OPENAI_API_KEY");
+
     SliceDevice slice =
         SliceDevice.Open();
 
@@ -48,6 +59,11 @@ try
         new AudioRecorder(
             microphone,
             outputDirectory);
+
+    await using var transcription =
+        new LiveTranscriptionController(
+            recorder,
+            apiKey);
 
     using var cts =
         new CancellationTokenSource();
@@ -92,15 +108,31 @@ try
         Console.WriteLine(
             $"Recordings: {outputDirectory}");
 
+        if (transcription.Enabled)
+        {
+            Console.WriteLine(
+                "Live transcription: OpenAI gpt-live-transcribe, Hungarian");
+        }
+        else if (noTranscription)
+        {
+            Console.WriteLine(
+                "Live transcription: disabled by --no-transcribe");
+        }
+        else
+        {
+            Console.WriteLine(
+                "Live transcription: disabled - OPENAI_API_KEY is not set");
+        }
+
         Console.WriteLine();
         Console.WriteLine(
-            "GREEN  = start recording");
+            "GREEN  = start recording + transcription");
 
         Console.WriteLine(
             "MUTE   = pause/resume");
 
         Console.WriteLine(
-            "RED    = stop + finalize WAV");
+            "RED    = stop + finalize WAV/TXT");
 
         Console.WriteLine(
             "Ctrl+C = quit");
@@ -116,6 +148,7 @@ try
         await RunButtonLoopAsync(
             slice,
             recorder,
+            transcription,
             buttonEvents.Reader,
             cts.Token);
     }
@@ -149,17 +182,27 @@ try
 
         try
         {
+            string? transcript =
+                await transcription.FinishAsync();
+
+            if (transcript is not null)
+            {
+                Console.WriteLine(
+                    $"Transcript: {transcript}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Could not finalize transcription: {ex.Message}");
+        }
+
+        try
+        {
             slice.Lights.Reset();
         }
         catch
         {
-            try
-            {
-                slice.Lights.Reset();
-            }
-            catch
-            {
-            }
         }
 
         if (buttonWatchTask is not null)
@@ -228,6 +271,7 @@ static async Task PumpButtonsAsync(
 static async Task RunButtonLoopAsync(
     SliceDevice slice,
     AudioRecorder recorder,
+    LiveTranscriptionController transcription,
     ChannelReader<SlicePhysicalButtonEvent> reader,
     CancellationToken cancellationToken)
 {
@@ -250,9 +294,6 @@ static async Task RunButtonLoopAsync(
                 string path =
                     recorder.Start();
 
-                Console.WriteLine(
-                    $"RECORDING -> {path}");
-
                 slice.Lights.EnterCallAnimation();
 
                 await Task.Delay(
@@ -260,6 +301,35 @@ static async Task RunButtonLoopAsync(
                     cancellationToken);
 
                 slice.Lights.ShowActiveCall();
+
+                Console.WriteLine(
+                    $"RECORDING -> {path}");
+
+                if (transcription.Enabled)
+                {
+                    try
+                    {
+                        string? transcriptPath =
+                            await transcription.StartAsync(
+                                path,
+                                cancellationToken);
+
+                        Console.WriteLine(
+                            $"TRANSCRIBING -> {transcriptPath}");
+
+                        Console.Write(
+                            "LIVE -> ");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            $"Could not start live transcription: {ex.Message}");
+
+                        Console.Error.WriteLine(
+                            "Recording will continue without transcription.");
+                    }
+                }
+
                 break;
 
             case SlicePhysicalButton.Hangup:
@@ -276,10 +346,33 @@ static async Task RunButtonLoopAsync(
                     await recorder.StopAsync(
                         cancellationToken);
 
+                string? transcript =
+                    null;
+
+                try
+                {
+                    transcript =
+                        await transcription.FinishAsync(
+                            cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine(
+                        $"Could not finalize transcription: {ex.Message}");
+                }
+
                 slice.Lights.ExitAnimation();
 
+                Console.WriteLine();
                 Console.WriteLine(
                     $"SAVED -> {saved}");
+
+                if (transcript is not null)
+                {
+                    Console.WriteLine(
+                        $"TRANSCRIPT -> {transcript}");
+                }
 
                 break;
 
@@ -299,8 +392,20 @@ static async Task RunButtonLoopAsync(
                 {
                     slice.Lights.ShowActiveMutedCall();
 
+                    Console.WriteLine();
                     Console.WriteLine(
                         "PAUSED");
+
+                    try
+                    {
+                        await transcription.CommitAsync(
+                            cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            $"Could not finalize transcript segment: {ex.Message}");
+                    }
                 }
                 else
                 {
@@ -308,6 +413,12 @@ static async Task RunButtonLoopAsync(
 
                     Console.WriteLine(
                         "RECORDING");
+
+                    if (transcription.Enabled)
+                    {
+                        Console.Write(
+                            "LIVE -> ");
+                    }
                 }
 
                 break;
@@ -369,6 +480,18 @@ static string? ReadOption(
     return null;
 }
 
+static bool HasFlag(
+    string[] args,
+    string name)
+{
+    return args.Any(
+        arg =>
+            string.Equals(
+                arg,
+                name,
+                StringComparison.OrdinalIgnoreCase));
+}
+
 static void PrintHelp()
 {
     Console.WriteLine(
@@ -380,14 +503,21 @@ Usage:
   SliceTranscribe run
   SliceTranscribe run --mic "microphone name"
   SliceTranscribe run --output "C:\path\to\recordings"
+  SliceTranscribe run --no-transcribe
   SliceTranscribe mics
 
-Current milestone:
-  Pickup -> start WAV recording
-  Mute   -> pause/resume recording
-  Hangup -> stop and finalize WAV
+Environment:
 
-Hungarian speech-to-text is the next layer after this hardware/audio lifecycle
-has been validated on the HP Elite Slice.
+  OPENAI_API_KEY
+      Enables live Hungarian transcription with gpt-live-transcribe.
+
+Controls:
+
+  Pickup -> start WAV recording + live transcription
+  Mute   -> pause/resume; pausing also commits the current transcript turn
+  Hangup -> stop and finalize WAV + TXT transcript
+
+The original WAV remains the source-of-truth recording. Final transcript turns
+are appended to a UTF-8 .txt file beside the WAV.
 """);
 }
