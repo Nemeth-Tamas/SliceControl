@@ -34,6 +34,12 @@ internal sealed class RemoteWhisperTranscriptionController :
     private const int VadMinimumSpeechFrames =
         3;
 
+    private const int VadSpeechPaddingMilliseconds =
+        250;
+
+    private const int MinimumSpeechWindowMilliseconds =
+        1000;
+
     private readonly object _gate =
         new();
 
@@ -491,15 +497,18 @@ internal sealed class RemoteWhisperTranscriptionController :
                 sourceAudio,
                 sourceFormat);
 
-        if (!ContainsSpeech(
-            monoSamples))
+        float[]? speechSamples =
+            ExtractSpeechWindow(
+                monoSamples);
+
+        if (speechSamples is null)
         {
             return null;
         }
 
         byte[] wavBytes =
             ConvertToWave(
-                monoSamples);
+                speechSamples);
 
         using var form =
             new MultipartFormDataContent();
@@ -658,7 +667,7 @@ internal sealed class RemoteWhisperTranscriptionController :
             1)
         {
             samples =
-                new DownmixToMonoSampleProvider(
+                new StrongestChannelSampleProvider(
                     samples);
         }
 
@@ -704,12 +713,12 @@ internal sealed class RemoteWhisperTranscriptionController :
         return output.ToArray();
     }
 
-    private static bool ContainsSpeech(
+    private static float[]? ExtractSpeechWindow(
         float[] samples)
     {
         if (samples.Length == 0)
         {
-            return false;
+            return null;
         }
 
         int frameSamples =
@@ -717,12 +726,18 @@ internal sealed class RemoteWhisperTranscriptionController :
             VadFrameMilliseconds /
             1000;
 
+        int firstSpeechFrame =
+            -1;
+
+        int lastSpeechFrame =
+            -1;
+
         int qualifyingFrames =
             0;
 
-        for (int offset = 0;
+        for (int frame = 0, offset = 0;
              offset < samples.Length;
-             offset += frameSamples)
+             frame++, offset += frameSamples)
         {
             int count =
                 Math.Min(
@@ -773,15 +788,79 @@ internal sealed class RemoteWhisperTranscriptionController :
             {
                 qualifyingFrames++;
 
-                if (qualifyingFrames >=
-                    VadMinimumSpeechFrames)
+                if (firstSpeechFrame <
+                    0)
                 {
-                    return true;
+                    firstSpeechFrame =
+                        frame;
                 }
+
+                lastSpeechFrame =
+                    frame;
             }
         }
 
-        return false;
+        if (qualifyingFrames <
+                VadMinimumSpeechFrames ||
+            firstSpeechFrame < 0 ||
+            lastSpeechFrame < 0)
+        {
+            return null;
+        }
+
+        int paddingSamples =
+            TargetSampleRate *
+            VadSpeechPaddingMilliseconds /
+            1000;
+
+        int startSample =
+            Math.Max(
+                0,
+                firstSpeechFrame *
+                    frameSamples -
+                paddingSamples);
+
+        int endSample =
+            Math.Min(
+                samples.Length,
+                (lastSpeechFrame + 1) *
+                    frameSamples +
+                paddingSamples);
+
+        int speechLength =
+            endSample -
+            startSample;
+
+        int minimumSamples =
+            TargetSampleRate *
+            MinimumSpeechWindowMilliseconds /
+            1000;
+
+        if (speechLength >=
+            minimumSamples)
+        {
+            return samples[
+                startSample..
+                endSample];
+        }
+
+        var padded =
+            new float[
+                minimumSamples];
+
+        int destinationOffset =
+            (minimumSamples -
+             speechLength) /
+            2;
+
+        Array.Copy(
+            samples,
+            startSample,
+            padded,
+            destinationOffset,
+            speechLength);
+
+        return padded;
     }
 
     private static byte[] ConvertToWave(
@@ -1029,7 +1108,7 @@ internal sealed class RemoteWhisperTranscriptionController :
         TaskCompletionSource<string?> Completion)
         : RemoteCommand;
 
-    private sealed class DownmixToMonoSampleProvider :
+    private sealed class StrongestChannelSampleProvider :
         ISampleProvider
     {
         private readonly ISampleProvider _source;
@@ -1037,7 +1116,10 @@ internal sealed class RemoteWhisperTranscriptionController :
         private float[] _sourceBuffer =
             Array.Empty<float>();
 
-        public DownmixToMonoSampleProvider(
+        private double[] _channelEnergy =
+            Array.Empty<double>();
+
+        public StrongestChannelSampleProvider(
             ISampleProvider source)
         {
             if (source.WaveFormat.Channels <=
@@ -1079,6 +1161,19 @@ internal sealed class RemoteWhisperTranscriptionController :
                         sourceSamplesNeeded];
             }
 
+            if (_channelEnergy.Length !=
+                channels)
+            {
+                _channelEnergy =
+                    new double[
+                        channels];
+            }
+            else
+            {
+                Array.Clear(
+                    _channelEnergy);
+            }
+
             int sourceSamplesRead =
                 _source.Read(
                     _sourceBuffer,
@@ -1093,9 +1188,6 @@ internal sealed class RemoteWhisperTranscriptionController :
                  frame < frames;
                  frame++)
             {
-                float sum =
-                    0;
-
                 int sourceOffset =
                     frame *
                     channels;
@@ -1104,17 +1196,44 @@ internal sealed class RemoteWhisperTranscriptionController :
                      channel < channels;
                      channel++)
                 {
-                    sum +=
+                    float sample =
                         _sourceBuffer[
                             sourceOffset +
                             channel];
-                }
 
+                    _channelEnergy[channel] +=
+                        sample *
+                        sample;
+                }
+            }
+
+            int strongestChannel =
+                0;
+
+            for (int channel = 1;
+                 channel < channels;
+                 channel++)
+            {
+                if (_channelEnergy[channel] >
+                    _channelEnergy[
+                        strongestChannel])
+                {
+                    strongestChannel =
+                        channel;
+                }
+            }
+
+            for (int frame = 0;
+                 frame < frames;
+                 frame++)
+            {
                 buffer[
                     offset +
                     frame] =
-                    sum /
-                    channels;
+                    _sourceBuffer[
+                        frame *
+                            channels +
+                        strongestChannel];
             }
 
             return frames;
