@@ -27,10 +27,10 @@ Small command-line utility built on the same API.
 
 `SliceTranscribe.exe`
 
-Button-driven microphone recorder and live Hungarian transcription app for the
-Slice. It references `SliceControl.dll` directly, uses NAudio for Windows
-WASAPI microphone capture, and can stream 24 kHz mono PCM16 audio to OpenAI
-`gpt-live-transcribe`.
+Button-driven microphone recorder and Hungarian transcription app for the
+Slice. It references `SliceControl.dll` directly and uses NAudio for Windows
+WASAPI microphone capture. Local CPU-only Whisper is now the default
+transcription backend; the OpenAI realtime backend remains optional.
 
 SliceControl itself has no external NuGet dependencies; SliceTranscribe uses
 NAudio.
@@ -381,39 +381,68 @@ SliceTranscribe temporarily stops `HPSliceTelephonyService` while running so
 it can own the private button-event registration. It restores the service on
 normal exit and through its cleanup path after application errors.
 
-### Live Hungarian transcription
+### Local Hungarian transcription
 
-Set `OPENAI_API_KEY` in the process environment before starting the app.
-The key is read from the environment only and is never written to the
-repository or transcript.
+Local Whisper is the default backend. SliceTranscribe uses the multilingual
+Whisper `base` model on the CPU and forces language `hu`.
 
-When enabled, SliceTranscribe opens an OpenAI Realtime transcription session
-using `gpt-live-transcribe`, explicitly hints Hungarian with `languages:
-["hu"]`, and resamples the capture stream to 24 kHz mono PCM16 for the API.
+The model is downloaded only once and stored outside the repository:
 
-Example:
+```text
+%LOCALAPPDATA%\SliceTranscribe\Models\ggml-base.bin
+```
+
+You can download it before the first recording:
 
 ```powershell
-$env:OPENAI_API_KEY = "your-api-key"
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe model
+```
+
+Then run normally:
+
+```powershell
 .\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe run --mic "HP Bang & Olufsen Audio Module"
 ```
 
-The WAV remains the source-of-truth recording. Final transcript turns are
-written beside it as UTF-8 text:
+The app records the original microphone stream to WAV while a background
+worker converts roughly six-second chunks to 16 kHz mono and transcribes them
+with Whisper. Completed chunks are printed as `LOCAL TEXT -> ...` and
+appended to a UTF-8 text file beside the WAV.
 
 ```text
 slice-20260925-123456.wav
 slice-20260925-123456.txt
 ```
 
-Partial transcript deltas are printed live while speech arrives. The current
-client intentionally disables server-side VAD because `gpt-live-transcribe`
-does not support it. A transcript turn is committed when Mute pauses the
-recording and again when Hangup stops/finalizes it.
+Mute immediately pauses the WAV/transcription feed and asks the local worker
+to flush the current partial chunk. Hangup stops the microphone and waits for
+any queued CPU transcription work before finalizing the TXT.
 
-If `OPENAI_API_KEY` is absent, recording still works and the app reports that
-live transcription is disabled. Use `--no-transcribe` to disable it
-explicitly.
+Whisper.net is intentionally pinned to `1.8.1` for this Windows 10 Slice.
+Its CPU runtime supports Windows with the Visual C++ 2019-or-newer runtime;
+the newer Whisper.net 1.9.x CPU runtime currently documents Windows 11 /
+Windows Server 2022 as its Windows minimum.
+
+The default model can be overridden:
+
+```powershell
+SliceTranscribe run --model "D:\Models\ggml-base.bin"
+```
+
+The previous OpenAI realtime backend is still available explicitly:
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+SliceTranscribe run --transcriber openai
+```
+
+Disable transcription entirely with:
+
+```powershell
+SliceTranscribe run --transcriber none
+```
+
+or the shorthand `--no-transcribe`.
 
 
 ## Status
