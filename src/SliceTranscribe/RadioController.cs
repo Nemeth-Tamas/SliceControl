@@ -1,3 +1,5 @@
+using NAudio.CoreAudioApi;
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text;
 
@@ -37,11 +39,12 @@ internal static class RadioController
             PauseReasons.Add(
                 reason);
 
-            bool paused =
-                await EnsureSilentAsync(
+            bool muted =
+                await SetRadioSessionMutedAsync(
+                    muted: true,
                     cancellationToken);
 
-            if (!paused)
+            if (!muted)
             {
                 PauseReasons.Remove(
                     reason);
@@ -50,7 +53,7 @@ internal static class RadioController
             }
 
             Console.WriteLine(
-                $"RADIO -> paused ({string.Join(", ", PauseReasons)})");
+                $"RADIO -> muted ({string.Join(", ", PauseReasons)})");
 
             return true;
         }
@@ -77,17 +80,23 @@ internal static class RadioController
                 return true;
             }
 
-            bool playing =
-                await EnsurePlayingAsync(
+            bool unmuted =
+                await SetRadioSessionMutedAsync(
+                    muted: false,
                     cancellationToken);
 
-            if (playing)
+            if (!unmuted)
             {
-                Console.WriteLine(
-                    "RADIO -> resumed");
+                return false;
             }
 
-            return playing;
+            await RecoverTransportIfNeededAsync(
+                cancellationToken);
+
+            Console.WriteLine(
+                "RADIO -> unmuted");
+
+            return true;
         }
         finally
         {
@@ -95,7 +104,118 @@ internal static class RadioController
         }
     }
 
-    private static async Task<bool> EnsureSilentAsync(
+    private static async Task<bool> SetRadioSessionMutedAsync(
+        bool muted,
+        CancellationToken cancellationToken)
+    {
+        for (int attempt = 0;
+             attempt < 6;
+             attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool found =
+                false;
+
+            try
+            {
+                using var enumerator =
+                    new MMDeviceEnumerator();
+
+                using MMDevice output =
+                    enumerator.GetDefaultAudioEndpoint(
+                        DataFlow.Render,
+                        Role.Multimedia);
+
+                AudioSessionManager manager =
+                    output.AudioSessionManager;
+
+                manager.RefreshSessions();
+
+                SessionCollection sessions =
+                    manager.Sessions;
+
+                for (int i = 0;
+                     i < sessions.Count;
+                     i++)
+                {
+                    try
+                    {
+                        using AudioSessionControl session =
+                            sessions[i];
+
+                        uint processId =
+                            session.GetProcessID;
+
+                        if (!IsVlcProcess(
+                            processId))
+                        {
+                            continue;
+                        }
+
+                        session.SimpleAudioVolume.Mute =
+                            muted;
+
+                        found =
+                            true;
+                    }
+                    catch
+                    {
+                        // Audio sessions can disappear while enumerating them.
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"RADIO -> audio-session control failed: {ex.Message}");
+            }
+
+            if (found)
+            {
+                return true;
+            }
+
+            if (attempt < 5)
+            {
+                await Task.Delay(
+                    150,
+                    cancellationToken);
+            }
+        }
+
+        Console.Error.WriteLine(
+            "RADIO -> VLC audio session was not found");
+
+        return false;
+    }
+
+    private static bool IsVlcProcess(
+        uint processId)
+    {
+        if (processId == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using Process process =
+                Process.GetProcessById(
+                    checked((int)processId));
+
+            return string.Equals(
+                process.ProcessName,
+                "vlc",
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task RecoverTransportIfNeededAsync(
         CancellationToken cancellationToken)
     {
         VlcPlaybackState state =
@@ -104,113 +224,24 @@ internal static class RadioController
 
         switch (state)
         {
-            case VlcPlaybackState.Paused:
-            case VlcPlaybackState.Stopped:
-                return true;
-
             case VlcPlaybackState.Playing:
-                if (!await SendCommandAsync(
-                    "pause",
-                    cancellationToken))
-                {
-                    return false;
-                }
+                return;
 
-                await Task.Delay(
-                    120,
+            case VlcPlaybackState.Paused:
+                await SendCommandAsync(
+                    "pause",
                     cancellationToken);
 
-                return await QueryStateAsync(
-                    cancellationToken) !=
-                    VlcPlaybackState.Playing;
+                return;
 
-            default:
-                Console.Error.WriteLine(
-                    "RADIO -> VLC state unknown; refusing blind pause toggle");
-
-                return false;
-        }
-    }
-
-    private static async Task<bool> EnsurePlayingAsync(
-        CancellationToken cancellationToken)
-    {
-        VlcPlaybackState state =
-            await QueryStateAsync(
-                cancellationToken);
-
-        string? command =
-            state switch
-            {
-                VlcPlaybackState.Playing =>
-                    null,
-
-                VlcPlaybackState.Paused =>
-                    "pause",
-
-                VlcPlaybackState.Stopped =>
+            case VlcPlaybackState.Stopped:
+            case VlcPlaybackState.Unknown:
+                await SendCommandAsync(
                     "play",
-
-                _ =>
-                    "play"
-            };
-
-        if (command is null)
-        {
-            return true;
-        }
-
-        if (!await SendCommandAsync(
-            command,
-            cancellationToken))
-        {
-            return false;
-        }
-
-        await Task.Delay(
-            250,
-            cancellationToken);
-
-        VlcPlaybackState after =
-            await QueryStateAsync(
-                cancellationToken);
-
-        if (after ==
-            VlcPlaybackState.Playing)
-        {
-            return true;
-        }
-
-        if (after ==
-            VlcPlaybackState.Stopped &&
-            command != "play")
-        {
-            if (!await SendCommandAsync(
-                "play",
-                cancellationToken))
-            {
-                return false;
-            }
-
-            await Task.Delay(
-                350,
-                cancellationToken);
-
-            after =
-                await QueryStateAsync(
                     cancellationToken);
+
+                return;
         }
-
-        if (after !=
-            VlcPlaybackState.Playing)
-        {
-            Console.Error.WriteLine(
-                $"RADIO -> resume failed; VLC state is {after}");
-
-            return false;
-        }
-
-        return true;
     }
 
     private static async Task<VlcPlaybackState> QueryStateAsync(
@@ -348,6 +379,7 @@ internal static class RadioController
             catch (OperationCanceledException)
                 when (!cancellationToken.IsCancellationRequested)
             {
+                // VLC RC keeps the socket open; timeout ends the response read.
             }
 
             return builder.ToString();
