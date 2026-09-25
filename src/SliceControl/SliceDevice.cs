@@ -42,12 +42,14 @@ public sealed class SliceDevice
         string col03 = FindRequired(slicePaths, 3);
 
         string? col04 = FindOptional(slicePaths, 4);
+        string? col05 = FindOptional(slicePaths, 5);
 
         return new SliceDevicePaths(
             col01,
             col02,
             col03,
-            col04);
+            col04,
+            col05);
     }
 
     public async Task WatchButtonsAsync(
@@ -77,21 +79,32 @@ public sealed class SliceDevice
     {
         ArgumentNullException.ThrowIfNull(callback);
 
-        Task col01 =
+        var tasks = new List<Task>
+        {
             WatchRawCollectionAsync(
                 Paths.Collection01,
                 1,
                 callback,
-                cancellationToken);
+                cancellationToken),
 
-        Task col02 =
             WatchRawCollectionAsync(
                 Paths.Collection02,
                 2,
                 callback,
-                cancellationToken);
+                cancellationToken)
+        };
 
-        await Task.WhenAll(col01, col02);
+        if (Paths.Collection05 is not null)
+        {
+            tasks.Add(
+                WatchRawCollectionAsync(
+                    Paths.Collection05,
+                    5,
+                    callback,
+                    cancellationToken));
+        }
+
+        await Task.WhenAll(tasks);
     }
 
     private async Task WatchTelephonyAsync(
@@ -132,7 +145,6 @@ public sealed class SliceDevice
 
             byte current = buffer[1];
 
-            // Absolute controls represent an actual state.
             EmitAbsoluteChanges(
                 reportId: 0x32,
                 previous,
@@ -140,7 +152,6 @@ public sealed class SliceDevice
                 TelephonyAbsoluteButtons,
                 callback);
 
-            // Relative controls are events, not held button states.
             EmitTriggers(
                 reportId: 0x32,
                 current,
@@ -317,7 +328,6 @@ public sealed class SliceDevice
                     StringComparison.OrdinalIgnoreCase));
     }
 
-    // HID descriptor says these are Absolute (81 02).
     private static readonly IReadOnlyDictionary<byte, SliceButton>
         TelephonyAbsoluteButtons =
             new Dictionary<byte, SliceButton>
@@ -326,12 +336,9 @@ public sealed class SliceDevice
                 [0x02] = SliceButton.Flash,
                 [0x08] = SliceButton.SpeakerPhone,
                 [0x20] = SliceButton.Send,
-
-                // Bit 7 still needs further descriptor / hardware mapping.
                 [0x80] = SliceButton.Button7
             };
 
-    // HID descriptor explicitly marks these Relative (81 06).
     private static readonly IReadOnlyDictionary<byte, SliceButton>
         TelephonyTriggerButtons =
             new Dictionary<byte, SliceButton>
