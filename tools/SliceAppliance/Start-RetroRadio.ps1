@@ -1,25 +1,15 @@
 param(
-    [string]$RadioUrl = "https://myonlineradio.hu/retro-radio"
+    [string]$PrimaryStream = "https://icast.connectmedia.hu/5002/live.mp3",
+    [string]$BackupStream = "https://icast.connectmedia.hu/5001/live.mp3"
 )
 
 $ErrorActionPreference = "Stop"
 
-function Find-ChromiumBrowser {
+function Find-Vlc {
     $candidates = @(
-        "$env:ProgramFiles(x86)\Microsoft\Edge\Application\msedge.exe",
-        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
-        "$env:LOCALAPPDATA\Microsoft\Edge\Application\msedge.exe",
-
-        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-        "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe",
-        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
-
-        "$env:ProgramFiles\BraveSoftware\Brave-Browser\Application\brave.exe",
-        "$env:ProgramFiles(x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\Application\brave.exe",
-
-        "$env:ProgramFiles\Chromium\Application\chrome.exe",
-        "$env:LOCALAPPDATA\Chromium\Application\chrome.exe"
+        "$env:ProgramFiles\VideoLAN\VLC\vlc.exe",
+        "$env:ProgramFiles(x86)\VideoLAN\VLC\vlc.exe",
+        "$env:LOCALAPPDATA\Programs\VideoLAN\VLC\vlc.exe"
     )
 
     foreach ($candidate in $candidates) {
@@ -28,61 +18,58 @@ function Find-ChromiumBrowser {
         }
     }
 
-    foreach ($name in @(
-        "msedge.exe",
-        "chrome.exe",
-        "brave.exe",
-        "chromium.exe"
-    )) {
-        $command = Get-Command $name -ErrorAction SilentlyContinue
-
-        if ($null -ne $command -and $command.Source) {
-            return $command.Source
-        }
+    $command = Get-Command "vlc.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $command -and $command.Source) {
+        return $command.Source
     }
 
-    foreach ($exeName in @(
-        "msedge.exe",
-        "chrome.exe",
-        "brave.exe"
+    foreach ($root in @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths"
     )) {
-        foreach ($root in @(
-            "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths",
-            "HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths"
-        )) {
-            $key = Join-Path $root $exeName
-
-            try {
-                $value = (Get-ItemProperty -Path $key -ErrorAction Stop).'(default)'
-
-                if ($value -and (Test-Path $value)) {
-                    return $value
-                }
+        $key = Join-Path $root "vlc.exe"
+        try {
+            $value = (Get-ItemProperty -Path $key -ErrorAction Stop).'(default)'
+            if ($value -and (Test-Path $value)) {
+                return $value
             }
-            catch {
-            }
+        }
+        catch {
         }
     }
 
     return $null
 }
 
-$browser = Find-ChromiumBrowser
+$vlc = Find-Vlc
 
-if ($browser) {
-    Write-Host "Radio browser: $browser"
-
-    $arguments = @(
-        "--app=$RadioUrl",
-        "--autoplay-policy=no-user-gesture-required",
-        "--no-first-run",
-        "--start-minimized"
-    )
-
-    Start-Process -FilePath $browser -ArgumentList $arguments
-    exit 0
+if (-not $vlc) {
+    throw "VLC was not found. Install VLC or add vlc.exe to PATH."
 }
 
-Write-Warning "No Chromium-based browser was found. Falling back to the Windows default browser; autoplay may require one manual click."
+$playlistDirectory = Join-Path $env:LOCALAPPDATA "SliceAppliance"
+New-Item -ItemType Directory -Path $playlistDirectory -Force | Out-Null
 
-Start-Process $RadioUrl
+$playlistPath = Join-Path $playlistDirectory "retro-radio.m3u8"
+
+@(
+    "#EXTM3U",
+    "#EXTINF:-1,Retro Radio - primary",
+    $PrimaryStream,
+    "#EXTINF:-1,Retro Radio - backup",
+    $BackupStream
+) | Set-Content -Path $playlistPath -Encoding UTF8
+
+Write-Host "VLC: $vlc"
+Write-Host "Retro Radio primary: $PrimaryStream"
+Write-Host "Retro Radio backup : $BackupStream"
+
+$arguments = @(
+    "--one-instance",
+    "--no-video",
+    "--qt-start-minimized",
+    "--playlist-autostart",
+    $playlistPath
+)
+
+Start-Process -FilePath $vlc -ArgumentList $arguments
