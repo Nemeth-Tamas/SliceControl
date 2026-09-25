@@ -31,8 +31,6 @@ public sealed class SlicePrivateDriver : IDisposable
     private const uint FileShareDelete = 0x00000004;
 
     private const uint OpenExisting = 3;
-    private const uint FileFlagOverlapped = 0x40000000;
-
     private readonly SafeFileHandle _handle;
     private readonly EventWaitHandle _keyEvent;
 
@@ -61,7 +59,7 @@ public sealed class SlicePrivateDriver : IDisposable
             FileShareRead | FileShareWrite | FileShareDelete,
             IntPtr.Zero,
             OpenExisting,
-            FileFlagOverlapped,
+            0,
             IntPtr.Zero);
 
         if (handle.IsInvalid)
@@ -221,9 +219,11 @@ public sealed class SlicePrivateDriver : IDisposable
 
     private void ThrowIfDisposed()
     {
-        ObjectDisposedException.ThrowIf(
-            _disposed,
-            this);
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(
+                nameof(SlicePrivateDriver));
+        }
     }
 
     [DllImport(
