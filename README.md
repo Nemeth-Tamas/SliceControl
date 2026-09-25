@@ -27,9 +27,10 @@ Small command-line utility built on the same API.
 
 `SliceTranscribe.exe`
 
-Button-driven microphone recorder and, next, Hungarian transcription app for
-the Slice. It references `SliceControl.dll` directly and uses NAudio for
-Windows WASAPI microphone capture.
+Button-driven microphone recorder and live Hungarian transcription app for the
+Slice. It references `SliceControl.dll` directly, uses NAudio for Windows
+WASAPI microphone capture, and can stream 24 kHz mono PCM16 audio to OpenAI
+`gpt-live-transcribe`.
 
 SliceControl itself has no external NuGet dependencies; SliceTranscribe uses
 NAudio.
@@ -316,11 +317,10 @@ slicectl service start
 
 Stopping/starting the service normally requires an elevated terminal.
 
-## SliceTranscribe - first audio milestone
+## SliceTranscribe
 
-The first SliceTranscribe milestone deliberately stops before speech-to-text:
-it proves the complete Collaboration Cover -> microphone -> WAV lifecycle
-first.
+SliceTranscribe now combines the validated Collaboration Cover -> microphone ->
+WAV lifecycle with optional live Hungarian speech-to-text.
 
 Build everything:
 
@@ -381,9 +381,40 @@ SliceTranscribe temporarily stops `HPSliceTelephonyService` while running so
 it can own the private button-event registration. It restores the service on
 normal exit and through its cleanup path after application errors.
 
-The next milestone, after validating a real WAV from the Slice microphone, is
-live Hungarian speech-to-text while preserving the same physical-button state
-machine.
+### Live Hungarian transcription
+
+Set `OPENAI_API_KEY` in the process environment before starting the app.
+The key is read from the environment only and is never written to the
+repository or transcript.
+
+When enabled, SliceTranscribe opens an OpenAI Realtime transcription session
+using `gpt-live-transcribe`, explicitly hints Hungarian with `languages:
+["hu"]`, and resamples the capture stream to 24 kHz mono PCM16 for the API.
+
+Example:
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+.\src\SliceTranscribe\bin\Debug\net8.0-windows\SliceTranscribe.exe run --mic "HP Bang & Olufsen Audio Module"
+```
+
+The WAV remains the source-of-truth recording. Final transcript turns are
+written beside it as UTF-8 text:
+
+```text
+slice-20260925-123456.wav
+slice-20260925-123456.txt
+```
+
+Partial transcript deltas are printed live while speech arrives. The current
+client intentionally disables server-side VAD because `gpt-live-transcribe`
+does not support it. A transcript turn is committed when Mute pauses the
+recording and again when Hangup stops/finalizes it.
+
+If `OPENAI_API_KEY` is absent, recording still works and the app reports that
+live transcription is disabled. Use `--no-transcribe` to disable it
+explicitly.
+
 
 ## Status
 
