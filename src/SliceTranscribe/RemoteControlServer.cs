@@ -1145,7 +1145,7 @@ internal sealed class RemoteControlServer :
             format.BitsPerSample ==
                 32;
 
-        bool pcm =
+        bool isPcm =
             format.Encoding ==
                 WaveFormatEncoding.Pcm ||
             (
@@ -1172,7 +1172,7 @@ internal sealed class RemoteControlServer :
                         source);
             }
             else if (
-                pcm &&
+                isPcm &&
                 format.BitsPerSample ==
                     16)
             {
@@ -1183,7 +1183,7 @@ internal sealed class RemoteControlServer :
                     32768f;
             }
             else if (
-                pcm &&
+                isPcm &&
                 format.BitsPerSample ==
                     24)
             {
@@ -1204,7 +1204,7 @@ internal sealed class RemoteControlServer :
                     8388608f;
             }
             else if (
-                pcm &&
+                isPcm &&
                 format.BitsPerSample ==
                     32)
             {
@@ -1225,7 +1225,7 @@ internal sealed class RemoteControlServer :
                     -1f,
                     1f);
 
-            short pcm =
+            short pcmSample =
                 (short)Math.Round(
                     sample *
                     short.MaxValue);
@@ -1236,12 +1236,12 @@ internal sealed class RemoteControlServer :
 
             result[target] =
                 (byte)(
-                    pcm &
+                    pcmSample &
                     0xff);
 
             result[target + 1] =
                 (byte)(
-                    (pcm >>
+                    (pcmSample >>
                      8) &
                     0xff);
         }
