@@ -43,8 +43,15 @@ try
                 phoneCts.Token);
         }
 
+        if (phoneCommand == "playpause")
+        {
+            return PhoneLinkController.TryToggleMediaPlayback()
+                ? 0
+                : 1;
+        }
+
         throw new ArgumentException(
-            "phone must be 'list' or 'connect'.");
+            "phone must be 'list', 'connect', or 'playpause'.");
     }
 
     if (command == "calls")
@@ -409,7 +416,7 @@ try
                 cts.Token);
 
         Console.WriteLine(
-            "Audio priority: non-radio playback pauses Retro Radio; 2 s quiet resumes it");
+            "Audio priority: non-radio playback mutes Retro Radio; 2 s quiet unmutes it");
 
         Console.WriteLine(
             phoneName is null
@@ -654,6 +661,9 @@ static async Task RunButtonLoopAsync(
     bool radioPausedByRecording =
         false;
 
+    bool phoneMediaPausedForRecording =
+        false;
+
     await foreach (
         SlicePhysicalButtonEvent ev
         in reader.ReadAllAsync(
@@ -682,6 +692,25 @@ static async Task RunButtonLoopAsync(
                         cancellationToken);
                 }
 
+                phoneMediaPausedForRecording =
+                    false;
+
+                if (PhoneMediaActivity.IsActive())
+                {
+                    phoneMediaPausedForRecording =
+                        PhoneLinkController.TryToggleMediaPlayback();
+
+                    if (phoneMediaPausedForRecording)
+                    {
+                        Console.WriteLine(
+                            "PHONE MEDIA -> paused for recording");
+
+                        await Task.Delay(
+                            180,
+                            cancellationToken);
+                    }
+                }
+
                 string path;
 
                 try
@@ -691,6 +720,14 @@ static async Task RunButtonLoopAsync(
                 }
                 catch
                 {
+                    if (phoneMediaPausedForRecording)
+                    {
+                        PhoneLinkController.TryToggleMediaPlayback();
+
+                        phoneMediaPausedForRecording =
+                            false;
+                    }
+
                     if (radioPausedByRecording)
                     {
                         await RadioController.ReleasePauseAsync(
@@ -772,6 +809,25 @@ static async Task RunButtonLoopAsync(
                         cancellationToken);
 
                 slice.Lights.ExitAnimation();
+
+                if (phoneMediaPausedForRecording)
+                {
+                    if (PhoneLinkController.TryToggleMediaPlayback())
+                    {
+                        Console.WriteLine(
+                            "PHONE MEDIA -> resumed after recording");
+
+                        // Give the A2DP session/activity monitor time to become
+                        // active again before the recording radio hold is
+                        // released, avoiding a brief radio/phone overlap.
+                        await Task.Delay(
+                            600,
+                            cancellationToken);
+                    }
+
+                    phoneMediaPausedForRecording =
+                        false;
+                }
 
                 if (radioPausedByRecording)
                 {
@@ -1025,6 +1081,7 @@ Usage:
   SliceTranscribe phone list
   SliceTranscribe phone connect
   SliceTranscribe phone connect --name "device name"
+  SliceTranscribe phone playpause
   SliceTranscribe media list
   SliceTranscribe calls mute
   SliceTranscribe calls hangup
