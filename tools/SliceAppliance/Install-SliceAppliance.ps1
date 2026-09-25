@@ -3,6 +3,7 @@ param(
     [string]$WhisperUrl = "http://192.168.1.2:8765",
     [string]$DiarizationUrl = "http://192.168.1.2:8766",
     [string]$WireGuardAddress = "10.10.10.12",
+    [string[]]$TrustedRemoteAddresses = @("10.10.10.0/24", "192.168.1.0/24"),
     [switch]$NoStart
 )
 
@@ -17,8 +18,7 @@ $remotePort = 8787
 $mcpPort = 8790
 $wireGuardSubnet = "10.10.10.0/24"
 
-$remotePrefix = "http://{0}:{1}/" -f $WireGuardAddress, $remotePort
-$loopbackPrefix = "http://127.0.0.1:{0}/" -f $remotePort
+$remotePrefix = "http://+:{0}/" -f $remotePort
 
 $remoteRuleName = "Slice Remote Control - WireGuard"
 $mcpRuleName = "Slice MCP - WireGuard"
@@ -45,19 +45,17 @@ try {
 catch {
 }
 
-foreach ($prefix in @($remotePrefix, $loopbackPrefix)) {
-    try {
-        & netsh http delete urlacl url=$prefix *> $null
-    }
-    catch {
-    }
+try {
+    & netsh http delete urlacl url=$remotePrefix *> $null
+}
+catch {
+}
 
-    try {
-        & netsh http add urlacl url=$prefix user="$env:USERDOMAIN\$env:USERNAME" *> $null
-    }
-    catch {
-        Write-Warning "Could not reserve $prefix. The elevated scheduled task may still be able to listen."
-    }
+try {
+    & netsh http add urlacl url=$remotePrefix user="$env:USERDOMAIN\$env:USERNAME" *> $null
+}
+catch {
+    Write-Warning "Could not reserve $remotePrefix. The elevated scheduled task may still be able to listen."
 }
 
 try {
@@ -70,8 +68,8 @@ try {
     Get-NetFirewallRule -DisplayName $mcpRuleName -ErrorAction SilentlyContinue |
         Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
-    New-NetFirewallRule -DisplayName $remoteRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $remotePort -LocalAddress $WireGuardAddress -RemoteAddress $wireGuardSubnet -Profile Any | Out-Null
-    New-NetFirewallRule -DisplayName $mcpRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $mcpPort -LocalAddress $WireGuardAddress -RemoteAddress $wireGuardSubnet -Profile Any | Out-Null
+    New-NetFirewallRule -DisplayName $remoteRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $remotePort -RemoteAddress $TrustedRemoteAddresses -Profile Any | Out-Null
+    New-NetFirewallRule -DisplayName $mcpRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $mcpPort -RemoteAddress $TrustedRemoteAddresses -Profile Any | Out-Null
 }
 catch {
     Write-Warning "Could not create one or more WireGuard-only Windows Firewall rules."
@@ -175,7 +173,7 @@ if (-not $NoStart) {
     Write-Host "WireGuard-only services:"
     Write-Host ("  Web UI: http://{0}:{1}/" -f $WireGuardAddress, $remotePort)
     Write-Host ("  MCP:    http://{0}:{1}/mcp" -f $WireGuardAddress, $mcpPort)
-    Write-Host ("  VPN subnet allowed by firewall: {0}" -f $wireGuardSubnet)
+    Write-Host ("  Remote networks allowed by firewall: {0}" -f ($TrustedRemoteAddresses -join ", "))
     Write-Host ("  Announcements: {0}" -f $announcementPath)
     Write-Host ("  Logs: {0}" -f (Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs"))
 
