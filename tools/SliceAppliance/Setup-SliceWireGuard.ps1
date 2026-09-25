@@ -10,7 +10,9 @@ param(
 
     [string]$RouterPublicKey = "oVkzTLGDWgKWtook3V208z3utg1ezAVDO6Vv0x8yTw8=",
 
-    [string]$TunnelName = "SliceHome"
+    [string]$TunnelName = "SliceHome",
+
+    [switch]$ForceNewKey
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +36,22 @@ New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
 $configPath = Join-Path $configDirectory "$TunnelName.conf"
 $publicKeyPath = Join-Path $configDirectory "$TunnelName.publickey.txt"
 
-$privateKey = (& $wg genkey).Trim()
+$privateKey = $null
+
+if ((Test-Path $configPath) -and -not $ForceNewKey) {
+    $privateKeyLine = Get-Content $configPath |
+        Where-Object { $_ -match '^PrivateKey\s*=' } |
+        Select-Object -First 1
+
+    if ($privateKeyLine) {
+        $privateKey = ($privateKeyLine -split '=', 2)[1].Trim()
+        Write-Host "Reusing existing SliceHome WireGuard keypair."
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($privateKey)) {
+    $privateKey = (& $wg genkey).Trim()
+}
 
 if ([string]::IsNullOrWhiteSpace($privateKey)) {
     throw "wg.exe did not generate a private key."
