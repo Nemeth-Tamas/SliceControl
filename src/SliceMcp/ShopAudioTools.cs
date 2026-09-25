@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace SliceMcp;
 
 [McpServerToolType]
-internal sealed class ShopAudioTools
+public sealed class ShopAudioTools
 {
     private readonly SliceApiClient _api;
 
