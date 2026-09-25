@@ -301,6 +301,9 @@ try
         new PhoneAudioManager(
             phoneName);
 
+    var audioActivity =
+        new AudioActivityMonitor();
+
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -326,6 +329,9 @@ try
     Task? phoneAudioTask =
         null;
 
+    Task? audioActivityTask =
+        null;
+
     try
     {
         if (restoreHpService)
@@ -341,6 +347,13 @@ try
         phoneAudioTask =
             phoneAudio.RunAsync(
                 cts.Token);
+
+        audioActivityTask =
+            audioActivity.RunAsync(
+                cts.Token);
+
+        Console.WriteLine(
+            "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
 
         Console.WriteLine(
             phoneName is null
@@ -444,7 +457,8 @@ try
                         $"Saved: {saved}");
                 }
 
-                await RadioController.ResumeAsync(
+                await RadioController.ReleasePauseAsync(
+                    "recording",
                     CancellationToken.None);
             }
             catch (Exception ex)
@@ -508,6 +522,22 @@ try
             {
                 Console.Error.WriteLine(
                     $"Phone audio manager stopped with an error: {ex.Message}");
+            }
+        }
+
+        if (audioActivityTask is not null)
+        {
+            try
+            {
+                await audioActivityTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Audio activity monitor stopped with an error: {ex.Message}");
             }
         }
 
@@ -585,7 +615,8 @@ static async Task RunButtonLoopAsync(
                 }
 
                 radioPausedByRecording =
-                    await RadioController.PauseAsync(
+                    await RadioController.RequestPauseAsync(
+                        "recording",
                         cancellationToken);
 
                 if (radioPausedByRecording)
@@ -606,7 +637,8 @@ static async Task RunButtonLoopAsync(
                 {
                     if (radioPausedByRecording)
                     {
-                        await RadioController.ResumeAsync(
+                        await RadioController.ReleasePauseAsync(
+                            "recording",
                             CancellationToken.None);
 
                         radioPausedByRecording =
@@ -687,7 +719,8 @@ static async Task RunButtonLoopAsync(
 
                 if (radioPausedByRecording)
                 {
-                    await RadioController.ResumeAsync(
+                    await RadioController.ReleasePauseAsync(
+                        "recording",
                         cancellationToken);
 
                     radioPausedByRecording =
