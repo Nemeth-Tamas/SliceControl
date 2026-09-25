@@ -1333,7 +1333,8 @@ internal sealed class RemoteControlServer :
                     Volatile.Read(
                         ref _monitorCount) > 0 ||
                     _talkActive ||
-                    _announcementActive)
+                    _announcementActive ||
+                    _announcementRecorder.IsRecording)
                 {
                     RefreshIndicator();
                 }
