@@ -59,10 +59,7 @@ internal sealed class RemoteControlServer :
             _announcementDirectory);
 
         _listener.Prefixes.Add(
-            $"http://127.0.0.1:{port}/");
-
-        _listener.Prefixes.Add(
-            $"http://{WireGuardAddress}:{port}/");
+            $"http://+:{port}/");
 
         Port =
             port;
