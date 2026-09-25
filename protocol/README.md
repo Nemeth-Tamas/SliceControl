@@ -875,6 +875,31 @@ The CLI also restored `HPSliceTelephonyService` after monitoring ended. This
 confirms the current correlation timing and priority order for normal
 human-speed presses on the tested hardware.
 
+When the application itself enters an active/off-hook telephony state, the HP
+driver keeps Collection 01 bit `0x01` set. Physical-button reports are then
+ORed with that state bit. A subsequent SliceTranscribe hardware test observed:
+
+```text
+Mute while active:
+32 01
+32 11
+
+Hangup while active:
+32 03
+32 01
+```
+
+So physical decoding must treat the distinctive button bits as masks rather
+than exact bytes while a call state is active:
+
+- mute is identified by bit `0x10` (`10` idle, `11` active),
+- idle pickup uses low bits `0x02`,
+- active hangup produces low-bit transition `0x03 -> 0x01`,
+- idle hangup remains the standalone `32 00` case.
+
+SliceControl's physical-button classifier now handles both idle and active-call
+forms.
+
 
 A controlled test removing the device-specific `LowerFilters` value and
 rebooting confirmed that `HPSliceTelephony` is integral to the exposed HID
