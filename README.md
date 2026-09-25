@@ -129,6 +129,54 @@ Example output:
 
 Relative telephony controls such as Phone Mute are exposed as `Triggered` events rather than fake Down/Up pairs.
 
+
+## Telephony state API
+
+SliceControl now exposes the higher-level HP telephony state reports in
+addition to the direct low-level `FE` LED protocol.
+
+Example:
+
+```csharp
+using var slice = SliceDevice.Open();
+
+slice.Telephony.EnterCall();
+slice.Telephony.ActiveDelayedExit();
+slice.Telephony.Attention();
+slice.Telephony.EndCall();
+```
+
+Known high-level lifecycle states:
+
+| API | Report | Observed behavior |
+|---|---|---|
+| `EnterCall()` | `41 02` | Green entrance animation |
+| `Attention()` | `41 04` | Green blinking attention/ringing state |
+| `ActiveDelayedExit()` | `41 20` | Green breathing; end request waits about 5 seconds |
+| `ActiveImmediateExit()` | `41 22` | Green breathing; end request exits immediately |
+| `EndCall()` | `41 00` | Return toward idle/end state |
+
+Mute/theme control is separate:
+
+```csharp
+slice.Telephony.EnableMuteTheme();
+```
+
+`42 01` switches an active presentation into the observed red breathing /
+yellow mute theme. The attention state temporarily renders green, then the
+red/muted presentation returns when the active state is restored.
+
+`SendMuteOffReport()` sends `42 00`, but on the tested hardware this did not
+visibly restore the normal green presentation, so it should currently be
+treated as experimental behavior rather than a guaranteed visual unmute.
+
+Raw state reports remain available:
+
+```csharp
+slice.Telephony.SendStateReport(0x22);
+slice.Telephony.SendMuteReport(0x01);
+```
+
 ## Raw input monitor
 
 ```powershell
