@@ -293,6 +293,11 @@ try
             args,
             "--phone-name");
 
+    bool experimentalCallHandoff =
+        HasFlag(
+            args,
+            "--experimental-call-handoff");
+
     string? modelPath =
         null;
 
@@ -425,12 +430,23 @@ try
             audioActivity.RunAsync(
                 cts.Token);
 
-        callProfileTask =
-            callProfile.RunAsync(
-                cts.Token);
+        if (experimentalCallHandoff)
+        {
+            callProfileTask =
+                callProfile.RunAsync(
+                    cts.Token);
+
+            Console.WriteLine(
+                "Call handoff: EXPERIMENTAL HFP/A2DP auto-handoff enabled");
+        }
+        else
+        {
+            Console.WriteLine(
+                "Call handoff: disabled (use --experimental-call-handoff to test)");
+        }
 
         Console.WriteLine(
-            "Audio priority: active iPhone A2DP media mutes Retro Radio; HFP calls release A2DP ownership");
+            "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
 
         Console.WriteLine(
             phoneName is null
@@ -1099,6 +1115,7 @@ Usage:
   SliceTranscribe run --transcriber none
   SliceTranscribe run --no-transcribe
   SliceTranscribe run --phone-name "Tamás's iPhone"
+  SliceTranscribe run --experimental-call-handoff
 
   SliceTranscribe model
   SliceTranscribe model --model "C:\path\ggml-base.bin"
