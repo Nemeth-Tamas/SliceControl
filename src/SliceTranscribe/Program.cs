@@ -80,6 +80,9 @@ try
     const string defaultRemoteUrl =
         "http://192.168.1.2:8765";
 
+    const string defaultDiarizationUrl =
+        "http://192.168.1.2:8766";
+
     string transcriptionMode =
         noTranscription
             ? "none"
@@ -105,6 +108,19 @@ try
             args,
             "--remote-url")
         ?? defaultRemoteUrl;
+
+    bool noDiarization =
+        HasFlag(
+            args,
+            "--no-diarization");
+
+    string? diarizationUrl =
+        noDiarization
+            ? null
+            : ReadOption(
+                args,
+                "--diarization-url")
+              ?? defaultDiarizationUrl;
 
     int remoteChannel =
         0;
@@ -171,7 +187,8 @@ try
                 new RemoteWhisperTranscriptionController(
                     recorder,
                     remoteUrl,
-                    remoteChannel),
+                    remoteChannel,
+                    diarizationUrl),
 
             "local" =>
                 new LocalWhisperTranscriptionController(
@@ -241,6 +258,11 @@ try
 
                 Console.WriteLine(
                     $"Microphone channel: {remoteChannel}");
+
+                Console.WriteLine(
+                    diarizationUrl is null
+                        ? "Diarization: disabled"
+                        : $"Diarization: {diarizationUrl}");
 
                 break;
 
@@ -649,6 +671,8 @@ Usage:
   SliceTranscribe run --transcriber remote
   SliceTranscribe run --remote-url "http://192.168.1.2:8765"
   SliceTranscribe run --remote-channel 0
+  SliceTranscribe run --diarization-url "http://192.168.1.2:8766"
+  SliceTranscribe run --no-diarization
   SliceTranscribe run --transcriber local
   SliceTranscribe run --transcriber openai
   SliceTranscribe run --transcriber none
@@ -666,6 +690,9 @@ Default transcription backend:
       whisper.cpp HTTP server at http://192.168.1.2:8765
       Intended for full large-v3 on the RTX 3090 home PC.
       Defaults to microphone channel 0 and 12-second live chunks.
+      Finalization re-transcribes every available microphone channel and builds
+      a confidence/consensus transcript. Speaker diarization defaults to:
+      http://192.168.1.2:8766
 
 Optional backends:
 
