@@ -1417,7 +1417,7 @@ button.danger{background:#652d2d}
 <div class="card">
 <h2>Intercom</h2>
 <button id="talk" onclick="toggleTalk()">Talk OFF</button>
-<div class="small">Talk ducks Retro Radio and phone audio while your browser microphone is live.</div>
+<div id="talkHint" class="small">Talk ducks Retro Radio and phone audio while your browser microphone is live.</div>
 </div>
 
 <div class="card">
@@ -1434,6 +1434,11 @@ let lastMics='';
 
 const tokenBox=document.getElementById('token');
 tokenBox.value=localStorage.getItem('sliceToken')||'';
+
+if(!window.isSecureContext){
+  document.getElementById('talkHint').textContent=
+    'Talk needs HTTPS because browsers block microphone access on remote HTTP pages. Listen/record/announcements still work.';
+}
 
 function saveToken(){
   localStorage.setItem('sliceToken',tokenBox.value.trim());
@@ -1554,6 +1559,10 @@ function floatToPcm16(input){
 }
 async function toggleTalk(){
   if(talkSocket){ stopTalk(); return; }
+  if(!window.isSecureContext){
+    alert('Talk needs HTTPS (or a VPN HTTPS proxy) so the browser can use your microphone.');
+    return;
+  }
   stopListen();
   try{
     talkStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
