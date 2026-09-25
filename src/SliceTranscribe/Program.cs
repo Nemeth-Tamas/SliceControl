@@ -43,71 +43,8 @@ try
                 phoneCts.Token);
         }
 
-        if (phoneCommand == "playpause")
-        {
-            return PhoneLinkController.TryToggleMediaPlayback()
-                ? 0
-                : 1;
-        }
-
         throw new ArgumentException(
-            "phone must be 'list', 'connect', or 'playpause'.");
-    }
-
-    if (command == "calls")
-    {
-        string callsCommand =
-            args.Length >= 2
-                ? args[1].ToLowerInvariant()
-                : "help";
-
-        if (callsCommand == "record")
-        {
-            string? callMic =
-                ReadOption(
-                    args,
-                    "--mic");
-
-            using var callCts =
-                new CancellationTokenSource();
-
-            return await CallRecordingCommand.RunAsync(
-                callMic,
-                callCts.Token);
-        }
-
-        return callsCommand switch
-        {
-            "mute" =>
-                PhoneLinkController.TryToggleMute()
-                    ? 0
-                    : 1,
-
-            "hangup" =>
-                PhoneLinkController.TryHangUp()
-                    ? 0
-                    : 1,
-
-            _ =>
-                throw new ArgumentException(
-                    "calls must be 'mute', 'hangup', or 'record'.")
-        };
-    }
-
-    if (command == "media")
-    {
-        string mediaCommand =
-            args.Length >= 2
-                ? args[1].ToLowerInvariant()
-                : "list";
-
-        if (mediaCommand == "list")
-        {
-            return await MediaControlProbe.ListAsync();
-        }
-
-        throw new ArgumentException(
-            "media currently supports only 'list'.");
+            "phone must be 'list' or 'connect'.");
     }
 
     if (command == "model")
@@ -364,9 +301,6 @@ try
         new PhoneAudioManager(
             phoneName);
 
-    var audioActivity =
-        new AudioActivityMonitor();
-
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -392,9 +326,6 @@ try
     Task? phoneAudioTask =
         null;
 
-    Task? audioActivityTask =
-        null;
-
     try
     {
         if (restoreHpService)
@@ -410,16 +341,6 @@ try
         phoneAudioTask =
             phoneAudio.RunAsync(
                 cts.Token);
-
-        audioActivityTask =
-            audioActivity.RunAsync(
-                cts.Token);
-
-        Console.WriteLine(
-            "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
-
-        Console.WriteLine(
-            "Audio runtime: stable A2DP-only baseline; call experiments are manual commands only");
 
         Console.WriteLine(
             phoneName is null
@@ -523,8 +444,7 @@ try
                         $"Saved: {saved}");
                 }
 
-                await RadioController.ReleasePauseAsync(
-                    "recording",
+                await RadioController.ResumeAsync(
                     CancellationToken.None);
             }
             catch (Exception ex)
@@ -588,22 +508,6 @@ try
             {
                 Console.Error.WriteLine(
                     $"Phone audio manager stopped with an error: {ex.Message}");
-            }
-        }
-
-        if (audioActivityTask is not null)
-        {
-            try
-            {
-                await audioActivityTask;
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"Audio activity monitor stopped with an error: {ex.Message}");
             }
         }
 
@@ -681,8 +585,7 @@ static async Task RunButtonLoopAsync(
                 }
 
                 radioPausedByRecording =
-                    await RadioController.RequestPauseAsync(
-                        "recording",
+                    await RadioController.PauseAsync(
                         cancellationToken);
 
                 if (radioPausedByRecording)
@@ -703,8 +606,7 @@ static async Task RunButtonLoopAsync(
                 {
                     if (radioPausedByRecording)
                     {
-                        await RadioController.ReleasePauseAsync(
-                            "recording",
+                        await RadioController.ResumeAsync(
                             CancellationToken.None);
 
                         radioPausedByRecording =
@@ -785,8 +687,7 @@ static async Task RunButtonLoopAsync(
 
                 if (radioPausedByRecording)
                 {
-                    await RadioController.ReleasePauseAsync(
-                        "recording",
+                    await RadioController.ResumeAsync(
                         cancellationToken);
 
                     radioPausedByRecording =
@@ -1035,12 +936,6 @@ Usage:
   SliceTranscribe phone list
   SliceTranscribe phone connect
   SliceTranscribe phone connect --name "device name"
-  SliceTranscribe phone playpause
-  SliceTranscribe media list
-  SliceTranscribe calls mute
-  SliceTranscribe calls hangup
-  SliceTranscribe calls record
-  SliceTranscribe calls record --mic "HP Bang & Olufsen Audio Module"
 
 Default transcription backend:
 
