@@ -3,8 +3,12 @@ cd /d "%~dp0"
 title SliceDiarize - pyannote / RTX 3090
 
 if not defined HF_TOKEN (
+    for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('HF_TOKEN','User')"`) do set "HF_TOKEN=%%T"
+)
+
+if not defined HF_TOKEN (
     echo.
-    echo HF_TOKEN is not set.
+    echo HF_TOKEN is not set in this process or the user environment.
     echo Accept the pyannote Community-1 model terms on Hugging Face,
     echo create a read token, then set it with:
     echo.
