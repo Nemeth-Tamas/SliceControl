@@ -535,7 +535,7 @@ internal sealed class RemoteWhisperTranscriptionController :
         AddField(
             form,
             "temperature_inc",
-            "0.0");
+            "0.2");
 
         AddField(
             form,
