@@ -1,6 +1,5 @@
 param(
     [string]$Mic = "HP Bang & Olufsen Audio Module",
-    [string]$RadioUrl = "https://myonlineradio.hu/retro-radio",
     [string]$WhisperUrl = "http://192.168.1.2:8765",
     [string]$DiarizationUrl = "http://192.168.1.2:8766"
 )
@@ -25,7 +24,7 @@ if (-not (Test-Path $exe)) {
 }
 
 $transcribeArgs = 'run --mic "{0}" --remote-url "{1}" --diarization-url "{2}"' -f $Mic, $WhisperUrl, $DiarizationUrl
-$radioArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -RadioUrl "{1}"' -f $radioScript, $RadioUrl
+$radioArgs = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $radioScript
 
 $transcribeAction = New-ScheduledTaskAction -Execute $exe -Argument $transcribeArgs -WorkingDirectory (Split-Path -Parent $exe)
 $radioAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $radioArgs -WorkingDirectory $PSScriptRoot
@@ -38,7 +37,7 @@ $radioSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStop
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
 
 Register-ScheduledTask -TaskName "SliceTranscribe" -Action $transcribeAction -Trigger $trigger -Settings $transcribeSettings -Principal $principal -Description "Auto-start SliceTranscribe and restart it after failures." -Force | Out-Null
-Register-ScheduledTask -TaskName "Slice Retro Radio" -Action $radioAction -Trigger $trigger -Settings $radioSettings -Principal $principal -Description "Open Retro Radio in Microsoft Edge with autoplay enabled." -Force | Out-Null
+Register-ScheduledTask -TaskName "Slice Retro Radio" -Action $radioAction -Trigger $trigger -Settings $radioSettings -Principal $principal -Description "Play Retro Radio directly in VLC." -Force | Out-Null
 
 Write-Host
 Write-Host "Installed scheduled tasks:"
