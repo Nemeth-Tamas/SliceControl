@@ -16,11 +16,13 @@ internal static class RadioController
             cancellationToken);
     }
 
-    public static Task<bool> PlayAsync(
+    public static Task<bool> ResumeAsync(
         CancellationToken cancellationToken = default)
     {
+        // VLC RC's "pause" command is a state toggle. Using "play" after
+        // pausing a network stream did not reliably resume it on VLC 3.0.24.
         return SendAsync(
-            "play",
+            "pause",
             cancellationToken);
     }
 
