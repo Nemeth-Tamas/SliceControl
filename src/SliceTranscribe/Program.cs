@@ -54,6 +54,21 @@ try
                 ? args[1].ToLowerInvariant()
                 : "help";
 
+        if (callsCommand == "record")
+        {
+            string? callMic =
+                ReadOption(
+                    args,
+                    "--mic");
+
+            using var callCts =
+                new CancellationTokenSource();
+
+            return await CallRecordingCommand.RunAsync(
+                callMic,
+                callCts.Token);
+        }
+
         return callsCommand switch
         {
             "mute" =>
@@ -68,7 +83,7 @@ try
 
             _ =>
                 throw new ArgumentException(
-                    "calls must be 'mute' or 'hangup'.")
+                    "calls must be 'mute', 'hangup', or 'record'.")
         };
     }
 
@@ -1013,6 +1028,8 @@ Usage:
   SliceTranscribe media list
   SliceTranscribe calls mute
   SliceTranscribe calls hangup
+  SliceTranscribe calls record
+  SliceTranscribe calls record --mic "HP Bang & Olufsen Audio Module"
 
 Default transcription backend:
 
