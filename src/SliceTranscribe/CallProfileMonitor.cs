@@ -135,7 +135,7 @@ internal sealed class CallProfileMonitor
                 new MMDeviceEnumerator();
 
             MMDeviceCollection devices =
-                enumerator.EnumAudioEndpoints(
+                enumerator.EnumerateAudioEndPoints(
                     DataFlow.Render,
                     DeviceState.Active);
 
