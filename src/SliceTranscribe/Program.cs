@@ -1,8 +1,7 @@
 using NAudio.CoreAudioApi;
 using SliceControl;
+using SliceTranscribe;
 using System.Threading.Channels;
-
-namespace SliceTranscribe;
 
 try
 {
