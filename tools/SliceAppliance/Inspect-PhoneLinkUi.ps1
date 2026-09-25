@@ -45,13 +45,13 @@ function Write-ElementTree(
         $automationId = $element.Current.AutomationId
         $className = $element.Current.ClassName
         $enabled = $element.Current.IsEnabled
-        $pid = $element.Current.ProcessId
+        $processId = $element.Current.ProcessId
 
         if ([string]::IsNullOrWhiteSpace($name) -and [string]::IsNullOrWhiteSpace($automationId)) {
             continue
         }
 
-        $processName = Get-ProcessNameSafe $pid
+        $processName = Get-ProcessNameSafe $processId
         $line = "{0}{1} Process='{2}' Name='{3}' Id='{4}' Class='{5}' Enabled={6}" -f $Prefix, $controlType, $processName, $name, $automationId, $className, $enabled
         Write-Host $line
     }
@@ -81,8 +81,8 @@ if ($Notifications) {
             continue
         }
 
-        $pid = $window.Current.ProcessId
-        $processName = Get-ProcessNameSafe $pid
+        $processId = $window.Current.ProcessId
+        $processName = Get-ProcessNameSafe $processId
 
         if ($candidateProcesses -notcontains $processName) {
             continue
