@@ -19,6 +19,8 @@ internal static class FinalTranscriptRefiner
         string wavPath,
         string whisperServerUrl,
         string? diarizationServerUrl,
+        int minSpeakers = 2,
+        int maxSpeakers = 4,
         CancellationToken cancellationToken = default)
     {
         if (!File.Exists(
@@ -129,6 +131,8 @@ internal static class FinalTranscriptRefiner
                         http,
                         diarizationServerUrl,
                         monoWav,
+                        minSpeakers,
+                        maxSpeakers,
                         cancellationToken);
 
                 Console.WriteLine(
@@ -509,7 +513,7 @@ internal static class FinalTranscriptRefiner
                     selected.Channel));
         }
 
-        return MergeExactAdjacentDuplicates(
+        return CleanAndSortSegments(
             output);
     }
 
@@ -599,45 +603,79 @@ internal static class FinalTranscriptRefiner
             ?? candidates[0];
     }
 
-    private static List<FusedSegment> MergeExactAdjacentDuplicates(
+    private static List<FusedSegment> CleanAndSortSegments(
         IReadOnlyList<FusedSegment> input)
     {
+        var ordered =
+            input
+                .OrderBy(
+                    segment =>
+                        segment.Start)
+                .ThenBy(
+                    segment =>
+                        segment.End)
+                .ToList();
+
         var output =
             new List<FusedSegment>();
 
         foreach (
             FusedSegment segment
-            in input)
+            in ordered)
         {
-            if (output.Count == 0)
+            string normalized =
+                NormalizeText(
+                    segment.Text);
+
+            if (normalized.Length == 0)
             {
-                output.Add(
-                    segment);
                 continue;
             }
 
-            FusedSegment previous =
-                output[^1];
+            FusedSegment? duplicate =
+                output
+                    .LastOrDefault(
+                        previous =>
+                            NormalizeText(
+                                previous.Text) ==
+                                normalized &&
+                            Math.Abs(
+                                previous.Start -
+                                segment.Start) <=
+                                1.5);
 
-            if (NormalizeText(
-                    previous.Text) ==
-                NormalizeText(
-                    segment.Text))
+            if (duplicate is not null)
             {
-                output[^1] =
-                    previous with
-                    {
-                        End =
-                            Math.Max(
-                                previous.End,
-                                segment.End),
-                        Votes =
-                            Math.Max(
-                                previous.Votes,
-                                segment.Votes)
-                    };
-
                 continue;
+            }
+
+            if (output.Count > 0)
+            {
+                FusedSegment previous =
+                    output[^1];
+
+                if (NormalizeText(
+                        previous.Text) ==
+                    normalized &&
+                    segment.Start <=
+                        previous.End +
+                        1.0)
+                {
+                    output[^1] =
+                        previous with
+                        {
+                            End =
+                                Math.Max(
+                                    previous.End,
+                                    segment.End),
+                            Votes =
+                                Math.Max(
+                                    previous.Votes,
+                                    segment.Votes)
+                        };
+
+                    continue;
+                }
             }
 
             output.Add(
@@ -651,6 +689,8 @@ internal static class FinalTranscriptRefiner
         HttpClient http,
         string serverUrl,
         byte[] wavBytes,
+        int minSpeakers,
+        int maxSpeakers,
         CancellationToken cancellationToken)
     {
         Uri uri =
@@ -673,6 +713,18 @@ internal static class FinalTranscriptRefiner
             audio,
             "file",
             "recording.wav");
+
+        AddField(
+            form,
+            "min_speakers",
+            minSpeakers.ToString(
+                CultureInfo.InvariantCulture));
+
+        AddField(
+            form,
+            "max_speakers",
+            maxSpeakers.ToString(
+                CultureInfo.InvariantCulture));
 
         using HttpResponseMessage response =
             await http.PostAsync(
