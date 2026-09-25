@@ -442,6 +442,54 @@ The remote backend checks the server UI before starting transcription. If the
 server cannot be reached, WAV recording continues and the app reports the
 transcription startup failure.
 
+### Six-channel final consensus and speaker diarization
+
+Live transcription still uses one fixed B&O array channel for low latency.
+When RED is pressed, the finished six-channel WAV is reprocessed more
+carefully:
+
+1. every microphone channel is extracted independently and sent to the remote
+   whisper.cpp large-v3 server with `verbose_json`;
+2. per-channel timestamped segments are scored using word probability,
+   average log probability, and no-speech probability;
+3. the best overall channel becomes the temporal reference and overlapping
+   hypotheses from the other channels vote on each segment;
+4. the resulting consensus transcript is written beside the recording as
+   `*.final.txt`.
+
+If the diarization service at `http://192.168.1.2:8766` is available, the
+best final microphone channel is also sent to pyannote Community-1 and the
+consensus segments receive speaker labels such as `SPEAKER_00` and
+`SPEAKER_01`.
+
+The final pass can take noticeably longer than the live pass because the full
+recording is transcribed once per available microphone channel.
+
+The pyannote backend lives in:
+
+```text
+backend/SliceDiarize
+```
+
+It exposes:
+
+```text
+GET  /health
+POST /diarize
+```
+
+SliceTranscribe defaults to the diarization URL above. Disable it with:
+
+```powershell
+SliceTranscribe run --no-diarization
+```
+
+or point it elsewhere with:
+
+```powershell
+SliceTranscribe run --diarization-url "http://host:8766"
+```
+
 ### Local Hungarian transcription
 
 Local Whisper remains available as a fallback backend. SliceTranscribe uses
