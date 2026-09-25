@@ -30,6 +30,20 @@ try
         return 0;
     }
 
+    if (command == "analyzechannels")
+    {
+        if (args.Length < 2)
+        {
+            throw new ArgumentException(
+                "analyzechannels requires a WAV path.");
+        }
+
+        ChannelAnalyzer.Run(
+            args[1]);
+
+        return 0;
+    }
+
     if (command == "probechannels")
     {
         if (args.Length < 2)
@@ -720,6 +734,7 @@ Usage:
 
   SliceTranscribe model
   SliceTranscribe model --model "C:\path\ggml-base.bin"
+  SliceTranscribe analyzechannels "C:\path\recording.wav"
   SliceTranscribe probechannels "C:\path\recording.wav"
   SliceTranscribe probechannels "C:\path\recording.wav" --remote-url "http://192.168.1.2:8765"
   SliceTranscribe finalize "C:\path\recording.wav"
