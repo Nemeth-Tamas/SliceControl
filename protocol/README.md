@@ -195,8 +195,32 @@ Observed behavior:
   `41 22` was already rendering left the visible LEDs green even though the
   mute theme was latched. On the following lifecycle transition the red/yellow
   theme appeared.
-- Reliable immediate theme changes therefore use
-  `41 02 -> short delay -> 42 01/00 -> short delay -> 41 22`.
+- Reliable immediate theme changes through the high-level telephony path remain
+driver-state-dependent. SliceTranscribe therefore no longer uses report
+`42` for its pause/resume LEDs.
+
+For deterministic application visuals it uses the already-confirmed direct
+Collection 03 renderer instead:
+
+```text
+recording start:
+FE 00 04 02 00 00 00 00
+FE 00 01 02 00 00 00 00
+FE 00 02 02 00 00 00 00
+
+paused:
+FE 00 02 03 00 00 00 00
+
+resumed:
+FE 00 02 02 00 00 00 00
+
+stop:
+FE 00 05 00 00 00 00 00
+FE 00 00 00 00 00 00 00
+```
+
+This bypasses the telephony mute latch entirely and directly selects the green
+or red/yellow breathing renderer.
 
 ---
 
