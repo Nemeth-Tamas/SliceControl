@@ -961,11 +961,11 @@ The SliceControl project is intended to provide:
 
 Future work may include:
 
-- Definitive physical-button mapping.
 - Collection 04 reverse engineering.
-- Collection 05 reverse engineering, including the red hangup control.
+- Further Collection 05 runtime capture work outside RDP.
 - Additional undocumented LED states.
 - Event-based application bindings.
+- Validation of physical-button correlation under intentionally rapid presses.
 - A Windows HID filter driver capable of intercepting selected controls
   before Windows consumes them.
 - A test-signed KMDF driver for full programmable-button ownership.
