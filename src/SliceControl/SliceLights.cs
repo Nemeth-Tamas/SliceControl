@@ -62,6 +62,51 @@ public sealed class SliceLights
             value: Clamp(value));
     }
 
+    /// <summary>
+    /// Plays the proprietary call-entry animation directly through Collection
+    /// 03 without changing the HP telephony HID state machine.
+    /// </summary>
+    public void EnterCallAnimation(
+        bool muted = false,
+        int delayMilliseconds = 5)
+    {
+        byte mode =
+            muted
+                ? (byte)0x03
+                : (byte)0x02;
+
+        Send(
+            command: 0x04,
+            mode: mode);
+
+        Thread.Sleep(delayMilliseconds);
+
+        Send(
+            command: 0x01,
+            mode: mode);
+    }
+
+    /// <summary>
+    /// Shows the continuously breathing green active-call presentation.
+    /// </summary>
+    public void ShowActiveCall()
+    {
+        Send(
+            command: 0x02,
+            mode: 0x02);
+    }
+
+    /// <summary>
+    /// Shows the continuously breathing red active-call presentation with the
+    /// yellow mute indicator.
+    /// </summary>
+    public void ShowActiveMutedCall()
+    {
+        Send(
+            command: 0x02,
+            mode: 0x03);
+    }
+
     private void Send(
         byte command,
         byte mode = 0,
