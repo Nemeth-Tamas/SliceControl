@@ -56,6 +56,9 @@ try
             args,
             "--no-transcribe");
 
+    const string defaultRemoteUrl =
+        "http://192.168.1.2:8765";
+
     string transcriptionMode =
         noTranscription
             ? "none"
@@ -63,17 +66,24 @@ try
                 ReadOption(
                     args,
                     "--transcriber")
-                ?? "local")
+                ?? "remote")
                 .ToLowerInvariant();
 
     if (transcriptionMode is not (
+        "remote" or
         "local" or
         "openai" or
         "none"))
     {
         throw new ArgumentException(
-            "--transcriber must be local, openai, or none.");
+            "--transcriber must be remote, local, openai, or none.");
     }
+
+    string remoteUrl =
+        ReadOption(
+            args,
+            "--remote-url")
+        ?? defaultRemoteUrl;
 
     string? modelPath =
         null;
@@ -118,6 +128,11 @@ try
     await using ITranscriptionController transcription =
         transcriptionMode switch
         {
+            "remote" =>
+                new RemoteWhisperTranscriptionController(
+                    recorder,
+                    remoteUrl),
+
             "local" =>
                 new LocalWhisperTranscriptionController(
                     recorder,
@@ -177,6 +192,15 @@ try
 
         switch (transcriptionMode)
         {
+            case "remote":
+                Console.WriteLine(
+                    "Transcription: remote whisper.cpp / large-v3-turbo / Hungarian");
+
+                Console.WriteLine(
+                    $"Server: {remoteUrl}");
+
+                break;
+
             case "local":
                 Console.WriteLine(
                     "Transcription: local Whisper multilingual base / CPU / Hungarian");
@@ -576,6 +600,8 @@ Usage:
   SliceTranscribe run --mic "microphone name"
   SliceTranscribe run --output "C:\path\to\recordings"
 
+  SliceTranscribe run --transcriber remote
+  SliceTranscribe run --remote-url "http://192.168.1.2:8765"
   SliceTranscribe run --transcriber local
   SliceTranscribe run --transcriber openai
   SliceTranscribe run --transcriber none
@@ -587,12 +613,16 @@ Usage:
 
 Default transcription backend:
 
+  remote
+      whisper.cpp HTTP server at http://192.168.1.2:8765
+      Intended for large-v3-turbo on the RTX 3090 home PC.
+
+Optional backends:
+
   local
       Whisper multilingual base, CPU-only, Hungarian.
       The model is downloaded once to:
       %LOCALAPPDATA%\SliceTranscribe\Models\ggml-base.bin
-
-Optional backend:
 
   openai
       Uses gpt-live-transcribe and requires OPENAI_API_KEY.
@@ -603,8 +633,8 @@ Controls:
   Mute   -> pause/resume and flush the current local transcript chunk
   Hangup -> stop and finalize WAV + TXT transcript
 
-The original WAV remains the source-of-truth recording. Local Whisper emits
-completed text roughly every six seconds and appends it to a UTF-8 .txt file
-beside the WAV.
+The original WAV remains the source-of-truth recording. The selected Whisper
+backend emits completed text roughly every six seconds and appends it to a
+UTF-8 .txt file beside the WAV.
 """);
 }
