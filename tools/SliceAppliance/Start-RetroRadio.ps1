@@ -52,13 +52,21 @@ New-Item -ItemType Directory -Path $playlistDirectory -Force | Out-Null
 
 $playlistPath = Join-Path $playlistDirectory "retro-radio.m3u8"
 
-@(
+$playlistLines = @(
     "#EXTM3U",
     "#EXTINF:-1,Retro Radio - primary",
     $PrimaryStream,
     "#EXTINF:-1,Retro Radio - backup",
     $BackupStream
-) | Set-Content -Path $playlistPath -Encoding UTF8
+)
+
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+[System.IO.File]::WriteAllLines(
+    $playlistPath,
+    $playlistLines,
+    $utf8NoBom
+)
 
 Write-Host "VLC: $vlc"
 Write-Host "Retro Radio primary: $PrimaryStream"
