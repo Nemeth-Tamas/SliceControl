@@ -112,20 +112,28 @@ Report layout:
 
 `XX` is a seven-bit telephony LED state field.
 
-Tentative observed behavior during direct testing:
+Observed state behavior:
 
 | Value | Observed behavior |
 |---:|---|
-| `01` | No obvious visible effect |
-| `02` | Green fill/sweep in one direction |
-| `04` | Green fill/sweep in opposite direction |
-| `08` | No obvious visible effect |
-| `10` | Green flashing |
-| `20` | No obvious visible effect |
-| `40` | Slow green pulsing |
+| `00` | Idle/end-call request |
+| `02` | Green call entrance animation, then steady call indicators |
+| `04` | Green blinking/attention state; pickup and hangup indicators blink |
+| `20` | Green breathing active-call state; ending from this state is delayed by about 5 seconds |
+| `22` | Green breathing active-call state; visually similar to `20`, but ending exits immediately |
 
-These effects appear to be firmware-stateful rather than simple LED on/off
-bits.
+Important observations:
+
+- `20` and `22` look essentially the same while active, but their exit timing differs.
+- Switching `20 -> 22` or `22 -> 20` can be visually silent; the difference becomes visible when ending the call.
+- `20 -> 04 -> 20` produces breathing -> green blinking -> breathing.
+- `22 -> 04 -> 22` produces breathing -> green blinking -> breathing, then an immediate exit on `00`.
+- `04` from idle enters the blinking attention state directly without an entrance animation.
+- `00` from `20` allows roughly two more breathing cycles before the exit animation.
+- `00` from `22` starts the exit animation immediately.
+
+These reports are handled by the HP driver as lifecycle/state requests rather
+than direct one-bit LED controls.
 
 ### Report `0x42`
 
@@ -135,9 +143,13 @@ Report layout:
 42 01
 ```
 
-This corresponds to a standard mute LED output report.
+Observed behavior:
 
-No obvious visible effect was observed during direct testing.
+- `42 01` switches an active call presentation to the red/muted theme.
+- In the muted theme, the perimeter breathes red and the yellow mute indicator is illuminated.
+- Entering the `41 04` attention state temporarily overrides the muted presentation with green blinking.
+- Returning from attention to the prior active state restores the red/muted presentation, demonstrating that the mute/theme state remains latched underneath the attention renderer.
+- `42 00` did not visibly restore the normal green theme in testing, even when followed by an attention-state round trip. It is therefore exposed by SliceControl as an experimental/raw-compatible operation rather than documented as a guaranteed visual unmute.
 
 ---
 
@@ -245,6 +257,30 @@ FE 00 COMMAND ARG1 ARG2 00 00 00
 
 ---
 
+# High-level HP Telephony State Machine
+
+The stock HP driver translates Collection 01 reports into the proprietary
+Collection 03 `FE` command family.
+
+Observed mapping:
+
+| Collection 01 state | Low-level behavior |
+|---|---|
+| `41 02` | Green entrance sequence using `FE 04 02` followed by `FE 01 02` |
+| `41 20` | Green breathing active state using the `FE 02` family; delayed exit |
+| `41 22` | Green breathing active state using the `FE 02` family; immediate exit |
+| `41 04` | Green blinking/attention state using the `FE 03` family |
+| `41 00` | Return toward idle/end state |
+
+Mute/theme behavior is controlled separately by report `42`.
+
+This separation is important: lifecycle state and visual mute theme are not
+the same thing. During a muted active call, entering `41 04` produces green
+blinking, then returning to the active lifecycle state restores the red/yellow
+muted presentation.
+
+---
+
 # Confirmed Collection 03 Commands
 
 ## Hard Reset / Idle
@@ -263,7 +299,7 @@ command.
 
 ---
 
-## Incoming Call / Ringing State
+## Attention / Ringing State
 
 ```text
 FE 00 03 00 00 00 00 00
@@ -271,10 +307,86 @@ FE 00 03 00 00 00 00 00
 
 Observed behavior:
 
-- Green ring flashes continuously.
-- Green pickup icon illuminated.
-- Red hangup icon illuminated.
-- Animation continues indefinitely until another state or reset is sent.
+- Green perimeter flashes continuously.
+- Pickup and hangup indicators participate in the blinking attention presentation.
+- This renderer is green even when the underlying active call is in the red/yellow muted theme.
+- Returning to the prior active state restores the muted theme if it was active before the attention state.
+- Animation continues until another lifecycle state or reset is sent.
+
+---
+
+
+## Active Breathing State
+
+General form:
+
+```text
+FE 00 02 MODE 00 00 00 00
+```
+
+Observed modes:
+
+### Mode `00`
+
+```text
+FE 00 02 00 00 00 00 00
+```
+
+No visible effect was observed.
+
+### Mode `02` - Normal active call
+
+```text
+FE 00 02 02 00 00 00 00
+```
+
+Observed behavior:
+
+- Green perimeter breathes on and off.
+- Green pickup indicator participates in the breathing presentation.
+- Red hangup indicator remains steadily illuminated.
+
+### Mode `03` - Muted active call
+
+```text
+FE 00 02 03 00 00 00 00
+```
+
+Observed behavior:
+
+- Red perimeter breathes on and off.
+- Red active-call presentation is used.
+- Red hangup indicator remains steadily illuminated.
+- Yellow mute indicator remains steadily illuminated.
+
+---
+
+## Call Entrance Sequence
+
+The stock driver uses a two-command sequence:
+
+```text
+FE 00 04 MODE 00 00 00 00
+FE 00 01 MODE 00 00 00 00
+```
+
+with a very short delay between the commands.
+
+For mode `02`:
+
+- Green light starts at the front center.
+- It spreads around both sides toward the back.
+- Green pickup and red hangup indicators illuminate.
+
+For mode `03`:
+
+- The same entrance geometry is used with the red/muted theme.
+- Yellow mute is illuminated.
+
+Testing `FE 00 04 02 ...` by itself produced the green entrance/wraparound
+effect and call indicators. Testing `FE 00 01 02 ...` from reset caused the
+LEDs to blink off briefly and then return, showing that these commands are
+stateful and are best treated as a sequence.
 
 ---
 
@@ -295,12 +407,17 @@ FE 00 00 00 00 00 00 00
 
 Observed when exiting a green call state:
 
-- Green wraparound transition.
-- LEDs then disappear back-to-front.
+- Green wraparound/unwrap transition.
+- LEDs disappear back-to-front.
 - Final reset returns the panel to idle.
 
-The color and animation produced by command `05` appear to depend on the state
-that was active before it was issued.
+Observed when exiting a red/muted call state:
+
+- A brief red blink occurs first.
+- The red perimeter then unwraps/disappears.
+- Indicators turn off correctly at the end.
+
+The color of the exit animation inherits the currently active call theme.
 
 ---
 
@@ -547,9 +664,13 @@ Windows exposes this as a standard HID keyboard device.
 SliceControl now discovers this collection and includes it in `watchraw`
 when present.
 
-Further investigation is still required to determine which Collaboration
-Cover actions are emitted through this collection, especially whether the red
-hangup control appears here.
+During direct button testing, Collection 05 remained silent for the tested
+pickup, hangup, mute, volume-down, and volume-up sequence.
+
+The red hangup control therefore does not appear to use Collection 05 in the
+tested configuration. In Collection 01 traces it is associated with an
+otherwise-ambiguous `32 00` state-clear report rather than a unique dedicated
+button bit.
 
 ---
 
