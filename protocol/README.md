@@ -823,6 +823,43 @@ Hardware-confirmed behavior:
 The registered event therefore acts as a general recognized-key notification,
 not merely a volume-only notification.
 
+SliceControl now wraps this path in `SlicePrivateDriver`. The implementation
+matches the experimentally working session shape:
+
+```text
+CreateFile(
+  \\.\HPSlicePDO_SYM_03F0,
+  GENERIC_READ | GENERIC_WRITE,
+  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+  OPEN_EXISTING)
+
+0x3C4A2008 <- native event HANDLE bytes
+0x3C4A2004 <- one volume byte
+0x3C4A200C <- deregister before close
+```
+
+The event handle and PDO handle remain alive for the entire session.
+
+## Physical-button correlation layer
+
+Because the private event says only that a recognized control was pressed, the
+current high-level physical-button monitor correlates each private event with a
+short window of translated HID input:
+
+| Physical control | Correlated evidence |
+|---|---|
+| Pickup | `32 02` (usually followed by `32 00`) |
+| Hangup | recognized-key event + standalone `32 00` |
+| Mute | `32 10` (observed after a `32 00` prelude) |
+| Volume Up | `31 01` |
+| Volume Down | `31 02` |
+
+Classification prioritizes the distinctive nonzero reports before treating a
+remaining zero-state telephony report as Hangup. This prevents the release
+reports that accompany Pickup/Mute from being mislabeled as the red button.
+The implementation retains the matching raw reports as event evidence for
+debugging.
+
 
 A controlled test removing the device-specific `LowerFilters` value and
 rebooting confirmed that `HPSliceTelephony` is integral to the exposed HID
