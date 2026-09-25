@@ -17,6 +17,14 @@ internal static class RadioController
         new(
             StringComparer.OrdinalIgnoreCase);
 
+    private enum VlcPlaybackState
+    {
+        Unknown = 0,
+        Playing,
+        Paused,
+        Stopped
+    }
+
     public static async Task<bool> RequestPauseAsync(
         string reason,
         CancellationToken cancellationToken = default)
@@ -30,7 +38,7 @@ internal static class RadioController
                 reason);
 
             bool paused =
-                await EnsurePausedAsync(
+                await EnsureSilentAsync(
                     cancellationToken);
 
             if (!paused)
@@ -87,117 +95,162 @@ internal static class RadioController
         }
     }
 
-    private static async Task<bool> EnsurePausedAsync(
+    private static async Task<bool> EnsureSilentAsync(
         CancellationToken cancellationToken)
     {
-        bool? playing =
-            await QueryIsPlayingAsync(
+        VlcPlaybackState state =
+            await QueryStateAsync(
                 cancellationToken);
 
-        if (playing == false)
+        switch (state)
         {
-            return true;
+            case VlcPlaybackState.Paused:
+            case VlcPlaybackState.Stopped:
+                return true;
+
+            case VlcPlaybackState.Playing:
+                if (!await SendCommandAsync(
+                    "pause",
+                    cancellationToken))
+                {
+                    return false;
+                }
+
+                await Task.Delay(
+                    120,
+                    cancellationToken);
+
+                return await QueryStateAsync(
+                    cancellationToken) !=
+                    VlcPlaybackState.Playing;
+
+            default:
+                Console.Error.WriteLine(
+                    "RADIO -> VLC state unknown; refusing blind pause toggle");
+
+                return false;
         }
-
-        if (playing is null)
-        {
-            Console.Error.WriteLine(
-                "RADIO -> could not determine VLC state before pausing");
-
-            return false;
-        }
-
-        if (!await SendAsync(
-            "pause",
-            cancellationToken))
-        {
-            return false;
-        }
-
-        await Task.Delay(
-            120,
-            cancellationToken);
-
-        return await QueryIsPlayingAsync(
-            cancellationToken) == false;
     }
 
     private static async Task<bool> EnsurePlayingAsync(
         CancellationToken cancellationToken)
     {
-        bool? playing =
-            await QueryIsPlayingAsync(
+        VlcPlaybackState state =
+            await QueryStateAsync(
                 cancellationToken);
 
-        if (playing == true)
+        string? command =
+            state switch
+            {
+                VlcPlaybackState.Playing =>
+                    null,
+
+                VlcPlaybackState.Paused =>
+                    "pause",
+
+                VlcPlaybackState.Stopped =>
+                    "play",
+
+                _ =>
+                    "play"
+            };
+
+        if (command is null)
         {
             return true;
         }
 
-        if (playing is null)
-        {
-            Console.Error.WriteLine(
-                "RADIO -> could not determine VLC state before resuming");
-
-            return false;
-        }
-
-        if (!await SendAsync(
-            "pause",
+        if (!await SendCommandAsync(
+            command,
             cancellationToken))
         {
             return false;
         }
 
         await Task.Delay(
-            120,
+            250,
             cancellationToken);
 
-        return await QueryIsPlayingAsync(
-            cancellationToken) == true;
+        VlcPlaybackState after =
+            await QueryStateAsync(
+                cancellationToken);
+
+        if (after ==
+            VlcPlaybackState.Playing)
+        {
+            return true;
+        }
+
+        if (after ==
+            VlcPlaybackState.Stopped &&
+            command != "play")
+        {
+            if (!await SendCommandAsync(
+                "play",
+                cancellationToken))
+            {
+                return false;
+            }
+
+            await Task.Delay(
+                350,
+                cancellationToken);
+
+            after =
+                await QueryStateAsync(
+                    cancellationToken);
+        }
+
+        if (after !=
+            VlcPlaybackState.Playing)
+        {
+            Console.Error.WriteLine(
+                $"RADIO -> resume failed; VLC state is {after}");
+
+            return false;
+        }
+
+        return true;
     }
 
-    private static async Task<bool?> QueryIsPlayingAsync(
+    private static async Task<VlcPlaybackState> QueryStateAsync(
         CancellationToken cancellationToken)
     {
         string? response =
             await SendAndReadAsync(
-                "is_playing",
+                "status",
                 cancellationToken);
 
         if (response is null)
         {
-            return null;
+            return VlcPlaybackState.Unknown;
         }
 
-        string[] lines =
-            response
-                .Split(
-                    new[] { '\r', '\n' },
-                    StringSplitOptions.RemoveEmptyEntries);
+        string normalized =
+            response.ToLowerInvariant();
 
-        for (int i = lines.Length - 1;
-             i >= 0;
-             i--)
+        if (normalized.Contains(
+            "state playing"))
         {
-            string line =
-                lines[i].Trim();
-
-            if (line == "1")
-            {
-                return true;
-            }
-
-            if (line == "0")
-            {
-                return false;
-            }
+            return VlcPlaybackState.Playing;
         }
 
-        return null;
+        if (normalized.Contains(
+            "state paused"))
+        {
+            return VlcPlaybackState.Paused;
+        }
+
+        if (normalized.Contains(
+            "state stopped"))
+        {
+            return VlcPlaybackState.Stopped;
+        }
+
+        return VlcPlaybackState.Unknown;
     }
 
-    private static async Task<bool> SendAsync(
+    private static async Task<bool> SendCommandAsync(
         string command,
         CancellationToken cancellationToken)
     {
@@ -242,7 +295,7 @@ internal static class RadioController
                     cancellationToken);
 
             timeout.CancelAfter(
-                TimeSpan.FromMilliseconds(350));
+                TimeSpan.FromMilliseconds(500));
 
             using var reader =
                 new StreamReader(
@@ -256,7 +309,7 @@ internal static class RadioController
                 new StringBuilder();
 
             char[] buffer =
-                new char[512];
+                new char[1024];
 
             try
             {
@@ -282,7 +335,7 @@ internal static class RadioController
                     if (!stream.DataAvailable)
                     {
                         await Task.Delay(
-                            20,
+                            30,
                             timeout.Token);
 
                         if (!stream.DataAvailable)
@@ -295,8 +348,6 @@ internal static class RadioController
             catch (OperationCanceledException)
                 when (!cancellationToken.IsCancellationRequested)
             {
-                // VLC's RC interface keeps the TCP connection open. A short
-                // read timeout is expected after the command response.
             }
 
             return builder.ToString();
