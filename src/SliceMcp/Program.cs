@@ -17,8 +17,7 @@ builder.WebHost.ConfigureKestrel(
     options =>
     {
         options.Listen(
-            IPAddress.Parse(
-                bindAddress),
+            IPAddress.Any,
             port);
     });
 
