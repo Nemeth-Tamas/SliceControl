@@ -41,7 +41,7 @@ builder.Services.AddMcpServer()
             options.SessionMode =
                 HttpServerSessionMode.Stateless;
         })
-    .WithToolsFromAssembly();
+    .WithTools<ShopAudioTools>();
 
 var app =
     builder.Build();
