@@ -402,6 +402,9 @@ static async Task RunButtonLoopAsync(
                 Console.WriteLine(
                     $"RECORDING -> {path}");
 
+                Console.WriteLine(
+                    $"CAPTURE -> {recorder.CaptureFormat}");
+
                 if (transcription.Enabled)
                 {
                     try
