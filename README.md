@@ -407,7 +407,10 @@ Then run normally:
 The app records the original microphone stream to WAV while a background
 worker converts roughly six-second chunks to 16 kHz mono and transcribes them
 with Whisper. Completed chunks are printed as `LOCAL TEXT -> ...` and
-appended to a UTF-8 text file beside the WAV.
+appended to a UTF-8 text file beside the WAV. Before invoking Whisper, a small
+20 ms frame-based energy gate rejects silence/noise-only chunks; the Whisper
+processor also runs with no cross-chunk context, zero temperature, and a more
+aggressive no-speech threshold to reduce repeated silence hallucinations.
 
 ```text
 slice-20260925-123456.wav
