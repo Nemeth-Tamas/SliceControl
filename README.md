@@ -227,12 +227,16 @@ Known high-level lifecycle states:
 Mute/theme control is separate:
 
 ```csharp
-slice.Telephony.EnableMuteTheme();
+slice.Telephony.ApplyMuteTheme(
+    SliceTelephonyState.ActiveImmediateExit);
 ```
 
-`42 01` switches an active presentation into the observed red breathing /
-yellow mute theme. The attention state temporarily renders green, then the
-red/muted presentation returns when the active state is restored.
+`42 01` latches the muted theme, but hardware testing showed that an already
+running active renderer may continue showing green until the lifecycle state
+changes. For an immediate visible red/yellow transition, use
+`ApplyMuteTheme(...)`, which briefly leaves the active renderer, applies
+`42 01`, then resumes the requested active state with short firmware-settle
+delays.
 
 `SendMuteOffReport()` sends the raw `42 00` report. While an active
 `41 20` / `41 22` state is being rendered, that report alone does not visibly
