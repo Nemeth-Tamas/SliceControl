@@ -10,14 +10,8 @@ internal sealed class PhoneAudioManager :
     private readonly TimeSpan _retryDelay =
         TimeSpan.FromSeconds(5);
 
-    private readonly object _sync =
-        new();
-
     private AudioPlaybackConnection? _connection;
-    private CancellationTokenSource? _connectionCts;
     private string? _connectedDeviceName;
-
-    private volatile bool _suspendedForCall;
 
     public PhoneAudioManager(
         string? preferredName)
@@ -28,102 +22,21 @@ internal sealed class PhoneAudioManager :
                 : preferredName;
     }
 
-    public bool IsConnected
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _connection is not null;
-            }
-        }
-    }
+    public bool IsConnected =>
+        _connection is not null;
 
-    public string? ConnectedDeviceName
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _connectedDeviceName;
-            }
-        }
-    }
-
-    public bool IsSuspendedForCall =>
-        _suspendedForCall;
-
-    public void SetSuspendedForCall(
-        bool suspended)
-    {
-        if (_suspendedForCall ==
-            suspended)
-        {
-            return;
-        }
-
-        _suspendedForCall =
-            suspended;
-
-        if (suspended)
-        {
-            Console.WriteLine(
-                "PHONE A2DP -> suspended for HFP call");
-
-            CancellationTokenSource? connectionCts;
-
-            lock (_sync)
-            {
-                connectionCts =
-                    _connectionCts;
-            }
-
-            try
-            {
-                connectionCts?.Cancel();
-            }
-            catch
-            {
-            }
-        }
-        else
-        {
-            Console.WriteLine(
-                "PHONE A2DP -> call ended; reconnect enabled");
-        }
-    }
+    public string? ConnectedDeviceName =>
+        _connectedDeviceName;
 
     public async Task RunAsync(
         CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (_suspendedForCall)
-            {
-                try
-                {
-                    await Task.Delay(
-                        250,
-                        cancellationToken);
-                }
-                catch (OperationCanceledException)
-                    when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                continue;
-            }
-
             try
             {
                 DeviceInformation? device =
                     await FindPreferredDeviceAsync();
-
-                if (_suspendedForCall)
-                {
-                    continue;
-                }
 
                 if (device is null)
                 {
@@ -155,21 +68,11 @@ internal sealed class PhoneAudioManager :
                     continue;
                 }
 
-                using var connectionCts =
-                    CancellationTokenSource.CreateLinkedTokenSource(
-                        cancellationToken);
+                _connection =
+                    connection;
 
-                lock (_sync)
-                {
-                    _connection =
-                        connection;
-
-                    _connectionCts =
-                        connectionCts;
-
-                    _connectedDeviceName =
-                        device.Name;
-                }
+                _connectedDeviceName =
+                    device.Name;
 
                 var closed =
                     new TaskCompletionSource<bool>(
@@ -185,11 +88,8 @@ internal sealed class PhoneAudioManager :
                     if (sender.State ==
                         AudioPlaybackConnectionState.Closed)
                     {
-                        if (!_suspendedForCall)
-                        {
-                            Console.WriteLine(
-                                "PHONE -> disconnected; reconnect will be attempted automatically");
-                        }
+                        Console.WriteLine(
+                            "PHONE -> disconnected; reconnect will be attempted automatically");
 
                         closed.TrySetResult(
                             true);
@@ -201,20 +101,10 @@ internal sealed class PhoneAudioManager :
 
                 try
                 {
-                    if (_suspendedForCall)
-                    {
-                        continue;
-                    }
-
                     Console.WriteLine(
                         $"PHONE -> enabling {device.Name}");
 
                     await connection.StartAsync();
-
-                    if (_suspendedForCall)
-                    {
-                        continue;
-                    }
 
                     Console.WriteLine(
                         $"PHONE -> opening {device.Name}");
@@ -235,27 +125,20 @@ internal sealed class PhoneAudioManager :
                         continue;
                     }
 
-                    try
-                    {
-                        await closed.Task.WaitAsync(
-                            connectionCts.Token);
-                    }
-                    catch (OperationCanceledException)
-                        when (
-                            _suspendedForCall &&
-                            !cancellationToken.IsCancellationRequested)
-                    {
-                        // CallProfileMonitor intentionally canceled this
-                        // A2DP ownership so Phone Link can establish HFP.
-                    }
+                    // OpenAsync Success is authoritative. Do not immediately
+                    // poll State here: after an RF reconnect Windows can lag
+                    // briefly before State/StateChanged settles to Opened.
+                    // Keep this successful connection alive until Windows
+                    // explicitly raises Closed.
+                    await closed.Task.WaitAsync(
+                        cancellationToken);
                 }
                 finally
                 {
                     connection.StateChanged -=
                         StateChanged;
 
-                    await ReleaseConnectionAsync(
-                        connection);
+                    await ReleaseConnectionAsync();
                 }
             }
             catch (OperationCanceledException)
@@ -329,57 +212,24 @@ internal sealed class PhoneAudioManager :
                     StringComparison.OrdinalIgnoreCase));
     }
 
-    private Task ReleaseConnectionAsync(
-        AudioPlaybackConnection? expected = null)
+    private Task ReleaseConnectionAsync()
     {
-        AudioPlaybackConnection? connectionToDispose =
-            null;
-
-        CancellationTokenSource? ctsToDispose =
-            null;
-
-        lock (_sync)
+        if (_connection is not null)
         {
-            if (expected is not null &&
-                _connection is not null &&
-                !ReferenceEquals(
-                    expected,
-                    _connection))
+            try
             {
-                return Task.CompletedTask;
+                _connection.Dispose();
             }
-
-            connectionToDispose =
-                _connection;
-
-            ctsToDispose =
-                _connectionCts;
+            catch
+            {
+            }
 
             _connection =
                 null;
-
-            _connectionCts =
-                null;
-
-            _connectedDeviceName =
-                null;
         }
 
-        try
-        {
-            connectionToDispose?.Dispose();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            ctsToDispose?.Dispose();
-        }
-        catch
-        {
-        }
+        _connectedDeviceName =
+            null;
 
         return Task.CompletedTask;
     }
