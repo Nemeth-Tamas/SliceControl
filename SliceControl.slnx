@@ -2,5 +2,6 @@
   <Folder Name="/src/">
     <Project Path="src/SliceControl/SliceControl.csproj" />
     <Project Path="src/SliceCtl/SliceCtl.csproj" />
+    <Project Path="src/SliceTranscribe/SliceTranscribe.csproj" />
   </Folder>
 </Solution>
