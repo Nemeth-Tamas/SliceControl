@@ -117,7 +117,8 @@ def decode_pcm_wave(data: bytes) -> dict:
 @app.post("/diarize")
 async def diarize(
     file: UploadFile = File(...),
-    min_speakers: int = Form(2),
+    num_speakers: int | None = Form(None),
+    min_speakers: int = Form(1),
     max_speakers: int = Form(4),
 ):
     data = await file.read()
@@ -126,6 +127,12 @@ async def diarize(
         raise HTTPException(
             status_code=400,
             detail="Uploaded audio file is empty.",
+        )
+
+    if num_speakers is not None and num_speakers < 1:
+        raise HTTPException(
+            status_code=400,
+            detail="num_speakers must be at least 1.",
         )
 
     if min_speakers < 1:
@@ -146,11 +153,20 @@ async def diarize(
 
     try:
         async with pipeline_lock:
+            pipeline_kwargs = {
+                "min_speakers": min_speakers,
+                "max_speakers": max_speakers,
+            }
+
+            if num_speakers is not None:
+                pipeline_kwargs = {
+                    "num_speakers": num_speakers,
+                }
+
             output = await asyncio.to_thread(
                 pipeline,
                 audio_input,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers,
+                **pipeline_kwargs,
             )
 
     except Exception as exc:
@@ -193,6 +209,7 @@ async def diarize(
         "segments": segments,
         "speakers": speakers,
         "speaker_count": len(speakers),
+        "num_speakers": num_speakers,
         "min_speakers": min_speakers,
         "max_speakers": max_speakers,
     }
