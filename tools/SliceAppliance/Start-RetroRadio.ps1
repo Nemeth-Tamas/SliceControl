@@ -102,9 +102,25 @@ $arguments = @(
     $playlistPath
 )
 
-$process = Start-Process -FilePath $vlc -ArgumentList $arguments -WindowStyle Hidden -PassThru
-[System.IO.File]::WriteAllText(
-    $pidPath,
-    $process.Id.ToString(),
-    $utf8NoBom
-)
+while ($true) {
+    Write-Host "Starting VLC radio..."
+
+    $process = Start-Process -FilePath $vlc -ArgumentList $arguments -WindowStyle Hidden -PassThru
+
+    [System.IO.File]::WriteAllText(
+        $pidPath,
+        $process.Id.ToString(),
+        $utf8NoBom
+    )
+
+    try {
+        $process.WaitForExit()
+    }
+    catch {
+    }
+
+    Remove-Item -Path $pidPath -Force -ErrorAction SilentlyContinue
+
+    Write-Warning ("VLC exited (PID {0}); restarting in 2 seconds..." -f $process.Id)
+    Start-Sleep -Seconds 2
+}
