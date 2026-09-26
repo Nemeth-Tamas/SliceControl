@@ -221,23 +221,6 @@ internal sealed class AssistantMode :
         _runCancellationToken =
             cancellationToken;
 
-        _microphone =
-            MicrophoneSelector.Resolve(
-                _microphoneName);
-
-        _capture =
-            new WasapiCapture(
-                _microphone);
-
-        _captureFormat =
-            _capture.WaveFormat;
-
-        _capture.DataAvailable +=
-            OnDataAvailable;
-
-        Console.WriteLine(
-            $"ASSISTANT -> ECHO wake mode on {_microphone.FriendlyName}");
-
         Console.WriteLine(
             "ASSISTANT -> wake detection uses local Whisper tiny.en on the Slice CPU only");
 
@@ -249,66 +232,212 @@ internal sealed class AssistantMode :
                 ? $"ASSISTANT -> Hermes ready; session key {_hermes.SessionKey}"
                 : $"ASSISTANT -> Hermes not configured; run Configure-SliceAssistant.ps1 ({_hermes.ConfigPath})");
 
-        try
+        if (_enabled)
         {
-            _capture.StartRecording();
+            _ =
+                Task.Run(
+                    () =>
+                        NeuralTtsSpeaker.WarmUpAsync(
+                            cancellationToken),
+                    CancellationToken.None);
 
-            if (_enabled)
-            {
-                _ =
-                    Task.Run(
-                        () =>
-                            NeuralTtsSpeaker.WarmUpAsync(
-                                cancellationToken),
-                        CancellationToken.None);
+            _ =
+                Task.Run(
+                    () =>
+                        _wakeWhisper.WarmUpAsync(
+                            cancellationToken),
+                    CancellationToken.None);
 
-                _ =
-                    Task.Run(
-                        () =>
-                            _wakeWhisper.WarmUpAsync(
-                                cancellationToken),
-                        CancellationToken.None);
-
-                _ =
-                    Task.Run(
-                        () =>
-                            _fallbackWhisper.WarmUpAsync(
-                                cancellationToken),
-                        CancellationToken.None);
-
-            }
-
-            await Task.Delay(
-                Timeout.InfiniteTimeSpan,
-                cancellationToken);
+            _ =
+                Task.Run(
+                    () =>
+                        _fallbackWhisper.WarmUpAsync(
+                            cancellationToken),
+                    CancellationToken.None);
         }
-        catch (OperationCanceledException)
-            when (cancellationToken.IsCancellationRequested)
+
+        int restartCount =
+            0;
+
+        while (!cancellationToken.IsCancellationRequested)
         {
-        }
-        finally
-        {
+            WasapiCapture? capture =
+                null;
+
+            MMDevice? microphone =
+                null;
+
+            EventHandler<StoppedEventArgs>? stoppedHandler =
+                null;
+
+            var stopped =
+                new TaskCompletionSource<Exception?>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+
             try
             {
-                _capture.StopRecording();
+                microphone =
+                    MicrophoneSelector.Resolve(
+                        _microphoneName);
+
+                capture =
+                    new WasapiCapture(
+                        microphone);
+
+                _microphone =
+                    microphone;
+
+                _capture =
+                    capture;
+
+                _captureFormat =
+                    capture.WaveFormat;
+
+                capture.DataAvailable +=
+                    OnDataAvailable;
+
+                stoppedHandler =
+                    (_, e) =>
+                        stopped.TrySetResult(
+                            e.Exception);
+
+                capture.RecordingStopped +=
+                    stoppedHandler;
+
+                capture.StartRecording();
+
+                Console.WriteLine(
+                    restartCount == 0
+                        ? $"ASSISTANT -> ECHO wake mode on {microphone.FriendlyName}"
+                        : $"ASSISTANT MIC -> recovered on {microphone.FriendlyName} (restart {restartCount})");
+
+                Exception? stopError =
+                    await stopped.Task.WaitAsync(
+                        cancellationToken);
+
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    Console.Error.WriteLine(
+                        stopError is null
+                            ? "ASSISTANT MIC -> capture stopped unexpectedly; reopening in 1 s"
+                            : $"ASSISTANT MIC -> capture failed: {stopError.GetType().Name}: {stopError.Message}; reopening in 1 s");
+
+                    ResetCaptureState();
+
+                    await EndListeningDuckAsync();
+                }
             }
-            catch
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
             {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"ASSISTANT MIC -> open/capture error: {ex.GetType().Name}: {ex.Message}; reopening in 1 s");
+
+                ResetCaptureState();
+
+                await EndListeningDuckAsync();
+            }
+            finally
+            {
+                if (capture is not null)
+                {
+                    try
+                    {
+                        capture.StopRecording();
+                    }
+                    catch
+                    {
+                    }
+
+                    capture.DataAvailable -=
+                        OnDataAvailable;
+
+                    if (stoppedHandler is not null)
+                    {
+                        capture.RecordingStopped -=
+                            stoppedHandler;
+                    }
+
+                    capture.Dispose();
+                }
+
+                microphone?.Dispose();
+
+                if (ReferenceEquals(
+                    _capture,
+                    capture))
+                {
+                    _capture =
+                        null;
+
+                    _captureFormat =
+                        null;
+                }
+
+                if (ReferenceEquals(
+                    _microphone,
+                    microphone))
+                {
+                    _microphone =
+                        null;
+                }
             }
 
-            _capture.DataAvailable -=
-                OnDataAvailable;
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
 
-            await EndListeningDuckAsync();
+            restartCount++;
 
-            _capture.Dispose();
-            _microphone.Dispose();
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(
+                        1),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
 
-            _capture =
-                null;
+        await EndListeningDuckAsync();
+    }
 
-            _microphone =
-                null;
+    private void ResetCaptureState()
+    {
+        lock (_gate)
+        {
+            _rolling.SetLength(
+                0);
+
+            _command.SetLength(
+                0);
+
+            _listening =
+                false;
+
+            _processing =
+                false;
+
+            _probeBusy =
+                false;
+
+            _commandSpeechDetected =
+                false;
+
+            _lastIdleSpeech =
+                DateTimeOffset.MinValue;
+
+            _nextProbe =
+                DateTimeOffset.MinValue;
         }
     }
 
