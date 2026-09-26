@@ -5,17 +5,15 @@ using SliceControl;
 
 namespace SliceTranscribe;
 
-internal sealed record AssistantCommand(
-    string Id,
-    string Text,
-    DateTimeOffset CreatedAt);
-
 internal sealed record AssistantStatus(
     bool Enabled,
     string State,
-    int PendingCount,
+    bool HermesConfigured,
+    string HermesSessionKey,
+    string? HermesSessionId,
     string? LastWakeTranscript,
     string? LastCommand,
+    string? LastReply,
     string? LastError);
 
 internal sealed class AssistantMode :
@@ -51,14 +49,13 @@ internal sealed class AssistantMode :
     private readonly RecordingCoordinator _recording;
     private readonly string? _microphoneName;
     private readonly WhisperOneShotClient _whisper;
+    private readonly HermesAssistantClient _hermes =
+        new();
 
     private MemoryStream _rolling =
         new();
 
     private MemoryStream _command =
-        new();
-
-    private readonly List<AssistantCommand> _pending =
         new();
 
     private WasapiCapture? _capture;
@@ -82,6 +79,7 @@ internal sealed class AssistantMode :
 
     private string? _lastWakeTranscript;
     private string? _lastCommand;
+    private string? _lastReply;
     private string? _lastError;
 
     private CancellationToken _runCancellationToken;
@@ -126,23 +124,20 @@ internal sealed class AssistantMode :
                     _enabled,
                 State:
                     GetStateLocked(),
-                PendingCount:
-                    _pending.Count,
+                HermesConfigured:
+                    _hermes.IsConfigured,
+                HermesSessionKey:
+                    _hermes.SessionKey,
+                HermesSessionId:
+                    _hermes.SessionId,
                 LastWakeTranscript:
                     _lastWakeTranscript,
                 LastCommand:
                     _lastCommand,
+                LastReply:
+                    _lastReply,
                 LastError:
                     _lastError);
-        }
-    }
-
-    public AssistantCommand[] GetPending()
-    {
-        lock (_gate)
-        {
-            return _pending
-                .ToArray();
         }
     }
 
@@ -210,6 +205,11 @@ internal sealed class AssistantMode :
         Console.WriteLine(
             "ASSISTANT -> v0 wake detection uses short English Whisper probes on the RTX 3090");
 
+        Console.WriteLine(
+            _hermes.IsConfigured
+                ? $"ASSISTANT -> Hermes ready; session key {_hermes.SessionKey}"
+                : $"ASSISTANT -> Hermes not configured; run Configure-SliceAssistant.ps1 ({_hermes.ConfigPath})");
+
         try
         {
             _capture.StartRecording();
@@ -245,105 +245,6 @@ internal sealed class AssistantMode :
 
             _microphone =
                 null;
-        }
-    }
-
-    public async Task ReplyAsync(
-        string id,
-        string text,
-        CancellationToken cancellationToken = default)
-    {
-        AssistantCommand command;
-
-        lock (_gate)
-        {
-            int index =
-                _pending.FindIndex(
-                    item =>
-                        item.Id.Equals(
-                            id,
-                            StringComparison.OrdinalIgnoreCase));
-
-            if (index < 0)
-            {
-                throw new ArgumentException(
-                    $"No pending assistant command has id '{id}'.");
-            }
-
-            command =
-                _pending[index];
-
-            _pending.RemoveAt(
-                index);
-
-            _speaking =
-                true;
-
-            _lastError =
-                null;
-        }
-
-        Console.WriteLine(
-            $"ASSISTANT REPLY [{command.Id}] -> {text}");
-
-        bool restoreMute =
-            SafeGetMuted();
-
-        try
-        {
-            await RadioController.RequestPauseAsync(
-                "echo-tts",
-                cancellationToken);
-
-            await PhoneAudioSessionController.RequestMuteAsync(
-                "echo-tts",
-                cancellationToken);
-
-            if (restoreMute)
-            {
-                SystemAudioController.SetMuted(
-                    false);
-            }
-
-            _slice.Lights.ShowActiveCall();
-
-            await WindowsTtsSpeaker.SpeakAsync(
-                text,
-                cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            lock (_gate)
-            {
-                _lastError =
-                    ex.Message;
-            }
-
-            throw;
-        }
-        finally
-        {
-            if (restoreMute)
-            {
-                SystemAudioController.SetMuted(
-                    true);
-            }
-
-            await PhoneAudioSessionController.ReleaseMuteAsync(
-                "echo-tts",
-                CancellationToken.None);
-
-            await RadioController.ReleasePauseAsync(
-                "echo-tts",
-                CancellationToken.None);
-
-            lock (_gate)
-            {
-                _speaking =
-                    false;
-            }
-
-            RefreshLights();
         }
     }
 
@@ -624,26 +525,37 @@ internal sealed class AssistantMode :
                 return;
             }
 
-            var item =
-                new AssistantCommand(
-                    Id:
-                        Guid.NewGuid()
-                            .ToString("N")[..8],
-                    Text:
-                        command,
-                    CreatedAt:
-                        DateTimeOffset.UtcNow);
-
             lock (_gate)
             {
-                _pending.Add(
-                    item);
-
                 _lastCommand =
                     command;
 
+                _lastReply =
+                    null;
+
                 _lastError =
                     null;
+            }
+
+            Console.WriteLine();
+            Console.WriteLine(
+                $"ASSISTANT COMMAND -> {command}");
+
+            if (!_hermes.IsConfigured)
+            {
+                throw new InvalidOperationException(
+                    $"Hermes is not configured. Run Configure-SliceAssistant.ps1. Config: {_hermes.ConfigPath}");
+            }
+
+            string reply =
+                await _hermes.SendAsync(
+                    command,
+                    cancellationToken);
+
+            lock (_gate)
+            {
+                _lastReply =
+                    reply;
 
                 _processing =
                     false;
@@ -652,11 +564,19 @@ internal sealed class AssistantMode :
                     0);
             }
 
-            Console.WriteLine();
             Console.WriteLine(
-                $"ASSISTANT COMMAND [{item.Id}] -> {command}");
+                $"ASSISTANT HERMES -> {reply}");
 
-            await EndListeningDuckAsync();
+            try
+            {
+                await SpeakTransientAsync(
+                    reply,
+                    cancellationToken);
+            }
+            finally
+            {
+                await EndListeningDuckAsync();
+            }
 
             RefreshLights();
         }
@@ -1100,5 +1020,6 @@ internal sealed class AssistantMode :
         _rolling.Dispose();
         _command.Dispose();
         _whisper.Dispose();
+        _hermes.Dispose();
     }
 }
