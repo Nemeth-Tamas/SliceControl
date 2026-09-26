@@ -142,9 +142,6 @@ internal sealed class DiagnosticHealthMonitor
                             0.0005f ||
                         muted ||
                         processName.Equals(
-                            "SonoBus",
-                            StringComparison.OrdinalIgnoreCase) ||
-                        processName.Equals(
                             "vlc",
                             StringComparison.OrdinalIgnoreCase) ||
                         processName.Equals(
