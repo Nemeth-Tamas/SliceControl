@@ -11,6 +11,8 @@ internal sealed record ShopAudioStatus(
     string CurrentSource,
     float MasterLevel,
     string RadioState,
+    string? RadioPreset,
+    string? RadioStation,
     string RadioNowPlaying,
     string[] Errors);
 
@@ -201,6 +203,10 @@ internal static class ShopAudioStatusService
                 masterPeak,
             RadioState:
                 radioState,
+            RadioPreset:
+                RadioController.CurrentPreset,
+            RadioStation:
+                RadioController.CurrentStation,
             RadioNowPlaying:
                 nowPlaying,
             Errors:
