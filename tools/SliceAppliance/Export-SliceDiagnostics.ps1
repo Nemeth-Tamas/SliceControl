@@ -64,7 +64,7 @@ Add-CommandOutput "SYSTEM / UPTIME" {
 }
 
 Add-CommandOutput "SCHEDULED TASKS" {
-    $rows = foreach ($name in @("SliceTranscribe","Slice Retro Radio","Slice MCP","Slice SonoBus")) {
+    $rows = foreach ($name in @("SliceTranscribe","Slice Retro Radio","Slice MCP")) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         $info = Get-ScheduledTaskInfo -TaskName $name -ErrorAction SilentlyContinue
 
@@ -138,7 +138,7 @@ else {
     Add-Line "diagnostics.jsonl does not exist yet."
 }
 
-foreach ($file in @("SliceTranscribe.log","SliceTranscribe-error.log","SonoBus.log")) {
+foreach ($file in @("SliceTranscribe.log","SliceTranscribe-error.log")) {
     Add-Section ("RAW LOG: {0} (last {1} lines)" -f $file, $Tail)
     $path = Join-Path $logDirectory $file
 
