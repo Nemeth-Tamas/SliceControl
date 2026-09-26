@@ -603,7 +603,7 @@ internal sealed class AssistantMode :
     {
         try
         {
-            using var shadowCts =
+            var shadowCts =
                 CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken);
 
@@ -667,6 +667,10 @@ internal sealed class AssistantMode :
                 catch
                 {
                 }
+                finally
+                {
+                    shadowCts.Dispose();
+                }
 
                 LocalWhisperResult fallback =
                     await _fallbackWhisper.TranscribeAsync(
@@ -687,7 +691,8 @@ internal sealed class AssistantMode :
             {
                 _ =
                     ObserveLocalShadowAsync(
-                        localShadow);
+                        localShadow,
+                        shadowCts);
             }
 
             string command =
@@ -802,7 +807,8 @@ internal sealed class AssistantMode :
     }
 
     private async Task ObserveLocalShadowAsync(
-        Task<LocalWhisperResult> localTask)
+        Task<LocalWhisperResult> localTask,
+        CancellationTokenSource shadowCts)
     {
         try
         {
@@ -828,6 +834,10 @@ internal sealed class AssistantMode :
         {
             Console.Error.WriteLine(
                 $"LOCAL small.en SHADOW -> failed: {ex.Message}");
+        }
+        finally
+        {
+            shadowCts.Dispose();
         }
     }
 
