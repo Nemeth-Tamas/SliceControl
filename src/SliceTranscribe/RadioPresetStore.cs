@@ -22,7 +22,16 @@ internal static class RadioPresetStore
                 "https://icast.connectmedia.hu/5002/live.mp3",
 
             ["retro-backup"] =
-                "https://icast.connectmedia.hu/5001/live.mp3"
+                "https://icast.connectmedia.hu/5001/live.mp3",
+
+            ["radio1"] =
+                "https://icast.connectmedia.hu/5202/live.mp3",
+
+            ["juventus"] =
+                "https://www.radiojuventus.hu/stream_192k",
+
+            ["jazzy"] =
+                "https://radio.musorok.org/listen/jazzy/jazzy.mp3"
         };
 
     public static IReadOnlyDictionary<string, string> List()
@@ -99,9 +108,38 @@ internal static class RadioPresetStore
             if (parsed is not null &&
                 parsed.Count != 0)
             {
-                return new Dictionary<string, string>(
-                    parsed,
-                    StringComparer.OrdinalIgnoreCase);
+                var merged =
+                    new Dictionary<string, string>(
+                        parsed,
+                        StringComparer.OrdinalIgnoreCase);
+
+                bool changed =
+                    false;
+
+                foreach (
+                    KeyValuePair<string, string> preset
+                    in Defaults)
+                {
+                    if (merged.ContainsKey(
+                        preset.Key))
+                    {
+                        continue;
+                    }
+
+                    merged[preset.Key] =
+                        preset.Value;
+
+                    changed =
+                        true;
+                }
+
+                if (changed)
+                {
+                    Save(
+                        merged);
+                }
+
+                return merged;
             }
         }
         catch
@@ -115,9 +153,16 @@ internal static class RadioPresetStore
 
     private static void SaveDefaults()
     {
+        Save(
+            Defaults);
+    }
+
+    private static void Save(
+        IReadOnlyDictionary<string, string> presets)
+    {
         string json =
             JsonSerializer.Serialize(
-                Defaults,
+                presets,
                 new JsonSerializerOptions
                 {
                     WriteIndented =
