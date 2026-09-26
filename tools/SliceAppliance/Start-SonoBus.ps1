@@ -107,7 +107,13 @@ while ($true) {
             $hadRunningInstance = $false
         }
 
-        $launched = Start-Process -FilePath $sonoBus -ArgumentList $arguments -WindowStyle Minimized -PassThru
+        if ($arguments.Count -gt 0) {
+            $launched = Start-Process -FilePath $sonoBus -ArgumentList $arguments -WindowStyle Minimized -PassThru
+        }
+        else {
+            $launched = Start-Process -FilePath $sonoBus -WindowStyle Minimized -PassThru
+        }
+
         Write-SonoBusLog ("SonoBus launch requested (PID {0})." -f $launched.Id)
 
         Start-Sleep -Seconds 2
