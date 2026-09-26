@@ -657,7 +657,7 @@ internal sealed class AssistantMode :
             Math.Min(
                 100,
                 originalVolume +
-                5);
+                10);
 
         bool volumeBoosted =
             boostedVolume !=
