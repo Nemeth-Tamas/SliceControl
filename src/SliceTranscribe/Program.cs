@@ -5,6 +5,8 @@ using System.Threading.Channels;
 
 try
 {
+    DiagnosticLog.Initialize();
+
     string command =
         args.Length == 0
             ? "run"
@@ -323,6 +325,11 @@ try
             recording,
             assistant);
 
+    var diagnosticHealth =
+        new DiagnosticHealthMonitor(
+            assistant,
+            recording);
+
     Console.CancelKeyPress +=
         (_, eventArgs) =>
         {
@@ -357,6 +364,9 @@ try
     Task? assistantTask =
         null;
 
+    Task? diagnosticHealthTask =
+        null;
+
     try
     {
         if (restoreHpService)
@@ -388,6 +398,10 @@ try
             assistant.RunAsync(
                 cts.Token);
 
+        diagnosticHealthTask =
+            diagnosticHealth.RunAsync(
+                cts.Token);
+
         Console.WriteLine(
             "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
 
@@ -409,6 +423,9 @@ try
 
         Console.WriteLine(
             $"Recordings: {outputDirectory}");
+
+        Console.WriteLine(
+            $"Diagnostics: {DiagnosticLog.Path}");
 
         switch (transcriptionMode)
         {
@@ -485,6 +502,10 @@ try
     }
     finally
     {
+        DiagnosticLog.Event(
+            "process",
+            "shutdown_begin");
+
         cts.Cancel();
 
         await recording.StopForShutdownAsync();
@@ -580,6 +601,27 @@ try
             }
         }
 
+        if (diagnosticHealthTask is not null)
+        {
+            try
+            {
+                await diagnosticHealthTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Diagnostic health monitor stopped with an error: {ex.Message}");
+
+                DiagnosticLog.Error(
+                    "health",
+                    "monitor_stopped",
+                    ex);
+            }
+        }
+
         if (restoreHpService &&
             !HpTelephonyService.IsRunning())
         {
@@ -596,6 +638,11 @@ catch (Exception ex)
 {
     Console.Error.WriteLine(
         ex.ToString());
+
+    DiagnosticLog.Error(
+        "process",
+        "fatal",
+        ex);
 
     return 1;
 }
@@ -629,6 +676,15 @@ static async Task PumpButtonsAsync(
 
                 Console.Error.WriteLine(
                     $"BUTTON MONITOR -> stopped unexpectedly; restarting in 1 s (attempt {restartCount})");
+
+                DiagnosticLog.Warning(
+                    "buttons",
+                    "monitor_stopped",
+                    new
+                    {
+                        restart_count =
+                            restartCount
+                    });
             }
             catch (OperationCanceledException)
                 when (cancellationToken.IsCancellationRequested)
@@ -641,6 +697,16 @@ static async Task PumpButtonsAsync(
 
                 Console.Error.WriteLine(
                     $"BUTTON MONITOR -> error: {ex}");
+
+                DiagnosticLog.Error(
+                    "buttons",
+                    "monitor_error",
+                    ex,
+                    new
+                    {
+                        restart_count =
+                            restartCount
+                    });
 
                 Console.Error.WriteLine(
                     $"BUTTON MONITOR -> restarting in 1 s (attempt {restartCount})");
@@ -839,6 +905,15 @@ static void TryLightUpdate(
     {
         Console.Error.WriteLine(
             $"LIGHTS -> {operation} unavailable: {ex.GetType().Name}: {ex.Message}");
+
+        DiagnosticLog.Error(
+            "lights",
+            "update_failed",
+            ex,
+            new
+            {
+                operation
+            });
     }
 }
 
