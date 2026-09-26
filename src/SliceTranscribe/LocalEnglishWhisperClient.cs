@@ -67,6 +67,14 @@ internal sealed class LocalEnglishWhisperClient :
             "ggml-base.en.bin");
     }
 
+    public static LocalEnglishWhisperClient CreateSmallEn()
+    {
+        return new LocalEnglishWhisperClient(
+            GgmlType.SmallEn,
+            "small.en",
+            "ggml-small.en.bin");
+    }
+
     private LocalEnglishWhisperClient(
         GgmlType modelType,
         string displayName,
