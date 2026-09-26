@@ -599,25 +599,64 @@ static async Task PumpButtonsAsync(
     ChannelWriter<SlicePhysicalButtonEvent> writer,
     CancellationToken cancellationToken)
 {
+    int restartCount =
+        0;
+
     try
     {
-        await slice.WatchPhysicalButtonsAsync(
-            ev =>
-                writer.TryWrite(
-                    ev),
-            cancellationToken);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await slice.WatchPhysicalButtonsAsync(
+                    ev =>
+                        writer.TryWrite(
+                            ev),
+                    cancellationToken);
 
-        writer.TryComplete();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                restartCount++;
+
+                Console.Error.WriteLine(
+                    $"BUTTON MONITOR -> stopped unexpectedly; restarting in 1 s (attempt {restartCount})");
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                restartCount++;
+
+                Console.Error.WriteLine(
+                    $"BUTTON MONITOR -> error: {ex.GetType().Name}: {ex.Message}");
+
+                Console.Error.WriteLine(
+                    $"BUTTON MONITOR -> restarting in 1 s (attempt {restartCount})");
+            }
+
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(
+                        1),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
     }
-    catch (OperationCanceledException)
-        when (cancellationToken.IsCancellationRequested)
+    finally
     {
         writer.TryComplete();
-    }
-    catch (Exception ex)
-    {
-        writer.TryComplete(ex);
-        throw;
     }
 }
 
