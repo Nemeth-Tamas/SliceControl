@@ -79,9 +79,6 @@ internal static class ShopAudioStatusService
             bool phoneActive =
                 false;
 
-            bool sonoBusActive =
-                false;
-
             bool radioActive =
                 false;
 
@@ -127,15 +124,6 @@ internal static class ShopAudioStatusService
                     uint processId =
                         session.GetProcessID;
 
-                    if (IsSonoBus(
-                        processId))
-                    {
-                        sonoBusActive =
-                            true;
-
-                        continue;
-                    }
-
                     if (IsVlc(
                         processId))
                     {
@@ -158,9 +146,7 @@ internal static class ShopAudioStatusService
                     ? "muted"
                     : phoneActive
                         ? "phone-a2dp"
-                        : sonoBusActive
-                            ? "sonobus"
-                            : radioActive
+                        : radioActive
                             ? "radio"
                             : otherActive
                                 ? "windows-audio"
@@ -225,31 +211,6 @@ internal static class ShopAudioStatusService
                 nowPlaying,
             Errors:
                 errors.ToArray());
-    }
-
-    private static bool IsSonoBus(
-        uint processId)
-    {
-        if (processId == 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            using Process process =
-                Process.GetProcessById(
-                    checked(
-                        (int)processId));
-
-            return process.ProcessName.Equals(
-                "SonoBus",
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static bool IsVlc(
