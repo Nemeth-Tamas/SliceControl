@@ -25,6 +25,14 @@ internal static class WindowsTtsSpeaker
             textBase64 +
             "')); " +
             "$voice=New-Object -ComObject SAPI.SpVoice; " +
+            "$english=$null; " +
+            "foreach($v in @($voice.GetVoices())){" +
+            "$lang='';$desc='';" +
+            "try{$lang=$v.GetAttribute('Language')}catch{};" +
+            "try{$desc=$v.GetDescription()}catch{};" +
+            "if($lang -match '(^|;)409($|;)' -or $lang -match '(^|;)809($|;)' -or $desc -match 'English'){$english=$v;break}" +
+            "};" +
+            "if($english){$voice.Voice=$english};" +
             "$voice.Rate=0; $voice.Volume=100; " +
             "[void]$voice.Speak($text);";
 
