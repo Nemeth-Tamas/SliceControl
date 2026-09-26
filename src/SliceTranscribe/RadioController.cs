@@ -146,6 +146,21 @@ internal static class RadioController
             }
         }
 
+        string? title =
+            await SendAndReadAsync(
+                "get_title",
+                cancellationToken);
+
+        title =
+            CleanScalarResponse(
+                title);
+
+        if (!string.IsNullOrWhiteSpace(
+            title))
+        {
+            return title;
+        }
+
         VlcPlaybackState state =
             await QueryStateAsync(
                 cancellationToken);
@@ -383,6 +398,23 @@ internal static class RadioController
     private static async Task<VlcPlaybackState> QueryStateAsync(
         CancellationToken cancellationToken)
     {
+        string? playingResponse =
+            await SendAndReadAsync(
+                "is_playing",
+                cancellationToken);
+
+        string? playing =
+            CleanScalarResponse(
+                playingResponse);
+
+        if (string.Equals(
+            playing,
+            "1",
+            StringComparison.Ordinal))
+        {
+            return VlcPlaybackState.Playing;
+        }
+
         string? response =
             await SendAndReadAsync(
                 "status",
@@ -390,7 +422,12 @@ internal static class RadioController
 
         if (response is null)
         {
-            return VlcPlaybackState.Unknown;
+            return string.Equals(
+                playing,
+                "0",
+                StringComparison.Ordinal)
+                    ? VlcPlaybackState.Stopped
+                    : VlcPlaybackState.Unknown;
         }
 
         string normalized =
@@ -414,7 +451,12 @@ internal static class RadioController
             return VlcPlaybackState.Stopped;
         }
 
-        return VlcPlaybackState.Unknown;
+        return string.Equals(
+            playing,
+            "0",
+            StringComparison.Ordinal)
+                ? VlcPlaybackState.Stopped
+                : VlcPlaybackState.Unknown;
     }
 
     private static string? TryReadInfoField(
@@ -493,8 +535,23 @@ internal static class RadioController
             await using NetworkStream stream =
                 client.GetStream();
 
+            using var reader =
+                new StreamReader(
+                    stream,
+                    Encoding.UTF8,
+                    detectEncodingFromByteOrderMarks: false,
+                    bufferSize: 1024,
+                    leaveOpen: true);
+
+            // VLC's CLI sends a welcome message and prompt immediately after
+            // connecting. Drain that first so it cannot be mistaken for the
+            // command response.
+            await ReadUntilPromptAsync(
+                reader,
+                cancellationToken);
+
             byte[] bytes =
-                Encoding.ASCII.GetBytes(
+                Encoding.UTF8.GetBytes(
                     command + "\n");
 
             await stream.WriteAsync(
@@ -504,68 +561,13 @@ internal static class RadioController
             await stream.FlushAsync(
                 cancellationToken);
 
-            using var timeout =
-                CancellationTokenSource.CreateLinkedTokenSource(
+            string response =
+                await ReadUntilPromptAsync(
+                    reader,
                     cancellationToken);
 
-            timeout.CancelAfter(
-                TimeSpan.FromMilliseconds(500));
-
-            using var reader =
-                new StreamReader(
-                    stream,
-                    Encoding.ASCII,
-                    detectEncodingFromByteOrderMarks: false,
-                    bufferSize: 1024,
-                    leaveOpen: true);
-
-            var builder =
-                new StringBuilder();
-
-            char[] buffer =
-                new char[1024];
-
-            try
-            {
-                while (true)
-                {
-                    int read =
-                        await reader.ReadAsync(
-                            buffer.AsMemory(
-                                0,
-                                buffer.Length),
-                            timeout.Token);
-
-                    if (read == 0)
-                    {
-                        break;
-                    }
-
-                    builder.Append(
-                        buffer,
-                        0,
-                        read);
-
-                    if (!stream.DataAvailable)
-                    {
-                        await Task.Delay(
-                            30,
-                            timeout.Token);
-
-                        if (!stream.DataAvailable)
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-                when (!cancellationToken.IsCancellationRequested)
-            {
-                // VLC RC keeps the socket open; timeout ends the response read.
-            }
-
-            return builder.ToString();
+            return StripTrailingPrompt(
+                response);
         }
         catch (
             Exception ex)
@@ -586,4 +588,122 @@ internal static class RadioController
             return null;
         }
     }
+
+    private static async Task<string> ReadUntilPromptAsync(
+        StreamReader reader,
+        CancellationToken cancellationToken)
+    {
+        using var timeout =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+
+        timeout.CancelAfter(
+            TimeSpan.FromMilliseconds(
+                1500));
+
+        var builder =
+            new StringBuilder();
+
+        char[] one =
+            new char[1];
+
+        try
+        {
+            while (true)
+            {
+                int read =
+                    await reader.ReadAsync(
+                        one.AsMemory(
+                            0,
+                            1),
+                        timeout.Token);
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                builder.Append(
+                    one[0]);
+
+                if (
+                    builder.Length >= 2 &&
+                    builder[^2] == '>' &&
+                    builder[^1] == ' ')
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            // Some VLC commands may return without another prompt on older
+            // builds. Return whatever arrived before the timeout.
+        }
+
+        return builder.ToString();
+    }
+
+    private static string StripTrailingPrompt(
+        string response)
+    {
+        string cleaned =
+            response.Replace(
+                "\0",
+                string.Empty)
+            .TrimEnd();
+
+        if (cleaned.EndsWith(
+            ">",
+            StringComparison.Ordinal))
+        {
+            cleaned =
+                cleaned[..^1]
+                .TrimEnd();
+        }
+
+        return cleaned;
+    }
+
+    private static string? CleanScalarResponse(
+        string? response)
+    {
+        if (string.IsNullOrWhiteSpace(
+            response))
+        {
+            return null;
+        }
+
+        string[] lines =
+            response.Split(
+                new[]
+                {
+                    '\r',
+                    '\n'
+                },
+                StringSplitOptions.RemoveEmptyEntries);
+
+        for (int i = lines.Length - 1;
+             i >= 0;
+             i--)
+        {
+            string value =
+                lines[i].Trim();
+
+            if (
+                value.Length == 0 ||
+                value.Equals(
+                    ">",
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return value;
+        }
+
+        return null;
+    }
+
 }
