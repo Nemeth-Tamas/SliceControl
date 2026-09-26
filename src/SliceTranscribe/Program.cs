@@ -367,7 +367,10 @@ try
             HpTelephonyService.StopAndWait();
         }
 
-        slice.Lights.Reset();
+        TryLightUpdate(
+            () =>
+                slice.Lights.Reset(),
+            "startup reset");
 
         phoneAudioTask =
             phoneAudio.RunAsync(
@@ -488,7 +491,10 @@ try
 
         try
         {
-            slice.Lights.Reset();
+            TryLightUpdate(
+            () =>
+                slice.Lights.Reset(),
+            "idle reset");
         }
         catch
         {
@@ -700,15 +706,21 @@ static async Task RunButtonLoopAsync(
 
                     if (quietMode)
                     {
-                        slice.Lights.SetMutedCall(
-                            0);
+                        TryLightUpdate(
+                            () =>
+                                slice.Lights.SetMutedCall(
+                                    0),
+                            "quiet-mode indicator");
 
                         await Task.Delay(
                             500,
                             cancellationToken);
                     }
 
-                    slice.Lights.Reset();
+                    TryLightUpdate(
+                        () =>
+                            slice.Lights.Reset(),
+                        "idle reset");
                 }
                 else
                 {
@@ -761,16 +773,28 @@ static async Task ShowVolumeFeedbackAsync(
     {
         if (recording.IsPaused)
         {
-            slice.Lights.SetMutedCall(volume);
+            TryLightUpdate(
+                () =>
+                    slice.Lights.SetMutedCall(
+                        volume),
+                "muted recording volume");
         }
         else
         {
-            slice.Lights.SetCall(volume);
+            TryLightUpdate(
+                () =>
+                    slice.Lights.SetCall(
+                        volume),
+                "recording volume");
         }
     }
     else
     {
-        slice.Lights.SetBar(volume);
+        TryLightUpdate(
+            () =>
+                slice.Lights.SetBar(
+                    volume),
+            "volume bar");
     }
 
     Console.WriteLine(
@@ -784,16 +808,37 @@ static async Task ShowVolumeFeedbackAsync(
     {
         if (recording.IsPaused)
         {
-            slice.Lights.ShowActiveMutedCall();
+            TryLightUpdate(
+                () =>
+                    slice.Lights.ShowActiveMutedCall(),
+                "active muted call");
         }
         else
         {
-            slice.Lights.ShowActiveCall();
+            TryLightUpdate(
+                () =>
+                    slice.Lights.ShowActiveCall(),
+                "active call");
         }
     }
     else
     {
         slice.Lights.Reset();
+    }
+}
+
+static void TryLightUpdate(
+    Action action,
+    string operation)
+{
+    try
+    {
+        action();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(
+            $"LIGHTS -> {operation} unavailable: {ex.GetType().Name}: {ex.Message}");
     }
 }
 
