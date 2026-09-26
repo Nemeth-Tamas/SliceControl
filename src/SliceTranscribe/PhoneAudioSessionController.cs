@@ -46,6 +46,16 @@ internal static class PhoneAudioSessionController
             Console.WriteLine(
                 $"PHONE AUDIO -> muted ({FormatReasons()})");
 
+            DiagnosticLog.Event(
+                "phone_audio",
+                "mute_requested",
+                new
+                {
+                    reason,
+                    reasons =
+                        FormatReasons()
+                });
+
             return true;
         }
         finally
@@ -76,6 +86,16 @@ internal static class PhoneAudioSessionController
 
             if (stillHeld)
             {
+                DiagnosticLog.Event(
+                    "phone_audio",
+                    "mute_reason_released_still_held",
+                    new
+                    {
+                        reason,
+                        reasons =
+                            FormatReasons()
+                    });
+
                 return true;
             }
 
@@ -85,6 +105,15 @@ internal static class PhoneAudioSessionController
 
             Console.WriteLine(
                 "PHONE AUDIO -> unmuted");
+
+            DiagnosticLog.Event(
+                "phone_audio",
+                "unmuted",
+                new
+                {
+                    released_reason =
+                        reason
+                });
 
             return true;
         }
@@ -174,6 +203,15 @@ internal static class PhoneAudioSessionController
         {
             Console.Error.WriteLine(
                 $"PHONE AUDIO -> session mute failed: {ex.Message}");
+
+            DiagnosticLog.Error(
+                "phone_audio",
+                "session_mute_failed",
+                ex,
+                new
+                {
+                    muted
+                });
         }
 
         return Task.CompletedTask;
