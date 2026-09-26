@@ -34,18 +34,53 @@ internal sealed class LocalEnglishWhisperClient :
             1,
             1);
 
+    private readonly GgmlType _modelType;
+    private readonly string _displayName;
+    private readonly string _fileName;
+
     private WhisperFactory? _factory;
     private WhisperProcessor? _processor;
 
     private bool _disposed;
 
-    public static string ModelPath =>
+    private string ModelPath =>
         Path.Combine(
             Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData),
             "SliceAppliance",
             "STT",
+            _fileName);
+
+    public static LocalEnglishWhisperClient CreateTinyEn()
+    {
+        return new LocalEnglishWhisperClient(
+            GgmlType.TinyEn,
+            "tiny.en",
             "ggml-tiny.en.bin");
+    }
+
+    public static LocalEnglishWhisperClient CreateBaseEn()
+    {
+        return new LocalEnglishWhisperClient(
+            GgmlType.BaseEn,
+            "base.en",
+            "ggml-base.en.bin");
+    }
+
+    private LocalEnglishWhisperClient(
+        GgmlType modelType,
+        string displayName,
+        string fileName)
+    {
+        _modelType =
+            modelType;
+
+        _displayName =
+            displayName;
+
+        _fileName =
+            fileName;
+    }
 
     public async Task WarmUpAsync(
         CancellationToken cancellationToken = default)
@@ -58,7 +93,7 @@ internal sealed class LocalEnglishWhisperClient :
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"LOCAL STT -> tiny.en warm-up failed: {ex.Message}");
+                $"LOCAL STT -> {_displayName} warm-up failed: {ex.Message}");
         }
     }
 
@@ -197,7 +232,7 @@ internal sealed class LocalEnglishWhisperClient :
                 cancellationToken);
 
             Console.WriteLine(
-                $"LOCAL STT -> loading tiny.en from {ModelPath}");
+                $"LOCAL STT -> loading {_displayName} from {ModelPath}");
 
             _factory =
                 WhisperFactory.FromPath(
@@ -220,7 +255,7 @@ internal sealed class LocalEnglishWhisperClient :
             // Force the first real transcription to pay as little setup cost
             // as possible. Model creation itself performs the heavy load.
             Console.WriteLine(
-                "LOCAL STT -> tiny.en ready on Slice CPU");
+                $"LOCAL STT -> {_displayName} ready on Slice CPU");
 
             return _processor;
         }
@@ -233,7 +268,7 @@ internal sealed class LocalEnglishWhisperClient :
         }
     }
 
-    private static async Task EnsureModelAsync(
+    private async Task EnsureModelAsync(
         CancellationToken cancellationToken)
     {
         if (File.Exists(
@@ -261,7 +296,7 @@ internal sealed class LocalEnglishWhisperClient :
             partialPath);
 
         Console.WriteLine(
-            "LOCAL STT -> downloading Whisper tiny.en model once...");
+            $"LOCAL STT -> downloading Whisper {_displayName} model once...");
 
         try
         {
@@ -269,7 +304,7 @@ internal sealed class LocalEnglishWhisperClient :
                 await WhisperGgmlDownloader
                     .Default
                     .GetGgmlModelAsync(
-                        GgmlType.TinyEn);
+                        _modelType);
 
             await using (
                 var file =
@@ -298,7 +333,7 @@ internal sealed class LocalEnglishWhisperClient :
                 overwrite: true);
 
             Console.WriteLine(
-                $"LOCAL STT -> tiny.en model ready: {ModelPath}");
+                $"LOCAL STT -> {_displayName} model ready: {ModelPath}");
         }
         catch
         {
