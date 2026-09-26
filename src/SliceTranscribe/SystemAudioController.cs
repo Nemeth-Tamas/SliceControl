@@ -2,6 +2,12 @@ using NAudio.CoreAudioApi;
 
 namespace SliceTranscribe;
 
+internal sealed record VolumeAdjustmentResult(
+    int Before,
+    int RequestedDelta,
+    int Target,
+    int After);
+
 internal static class SystemAudioController
 {
     public static int VolumePercent
@@ -96,9 +102,46 @@ internal static class SystemAudioController
     public static int AdjustVolumePercent(
         int delta)
     {
-        return SetVolumePercent(
-            VolumePercent +
-            delta);
+        return AdjustVolumePercentDetailed(
+            delta).After;
+    }
+
+    public static VolumeAdjustmentResult AdjustVolumePercentDetailed(
+        int delta)
+    {
+        using MMDevice device =
+            GetDefaultRenderDevice();
+
+        int before =
+            (int)Math.Round(
+                device.AudioEndpointVolume.MasterVolumeLevelScalar *
+                100.0f);
+
+        int target =
+            Math.Clamp(
+                before +
+                delta,
+                0,
+                100);
+
+        device.AudioEndpointVolume.MasterVolumeLevelScalar =
+            target /
+            100.0f;
+
+        int after =
+            (int)Math.Round(
+                device.AudioEndpointVolume.MasterVolumeLevelScalar *
+                100.0f);
+
+        return new VolumeAdjustmentResult(
+            Before:
+                before,
+            RequestedDelta:
+                delta,
+            Target:
+                target,
+            After:
+                after);
     }
 
     private static MMDevice GetDefaultRenderDevice()
