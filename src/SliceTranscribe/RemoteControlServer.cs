@@ -260,18 +260,14 @@ internal sealed class RemoteControlServer :
                     return;
                 }
 
-                int applied =
-                    SystemAudioController.AdjustVolumePercent(
+                VolumeAdjustmentResult adjustment =
+                    SystemAudioController.AdjustVolumePercentDetailed(
                         delta);
 
                 await WriteJsonAsync(
                     context.Response,
                     200,
-                    new
-                    {
-                        volume =
-                            applied
-                    });
+                    adjustment);
 
                 return;
             }
