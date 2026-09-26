@@ -115,6 +115,21 @@ internal static class RadioController
             Console.WriteLine(
                 $"RADIO -> playing {_currentStation}");
 
+            DiagnosticLog.Event(
+                "radio",
+                "playing",
+                new
+                {
+                    preset =
+                        _currentPreset,
+                    station =
+                        _currentStation,
+                    url =
+                        _currentUrl,
+                    pause_reasons =
+                        PauseReasons.ToArray()
+                });
+
             return url;
         }
         finally
@@ -140,6 +155,10 @@ internal static class RadioController
             {
                 Console.WriteLine(
                     "RADIO -> stopped");
+
+                DiagnosticLog.Event(
+                    "radio",
+                    "stopped");
             }
 
             return stopped;
@@ -235,11 +254,31 @@ internal static class RadioController
                 PauseReasons.Remove(
                     reason);
 
+                DiagnosticLog.Warning(
+                    "radio",
+                    "pause_failed",
+                    new
+                    {
+                        reason,
+                        pause_reasons =
+                            PauseReasons.ToArray()
+                    });
+
                 return false;
             }
 
             Console.WriteLine(
                 $"RADIO -> muted ({string.Join(", ", PauseReasons)})");
+
+            DiagnosticLog.Event(
+                "radio",
+                "pause_requested",
+                new
+                {
+                    reason,
+                    pause_reasons =
+                        PauseReasons.ToArray()
+                });
 
             return true;
         }
@@ -263,6 +302,17 @@ internal static class RadioController
 
             if (PauseReasons.Count != 0)
             {
+                DiagnosticLog.Event(
+                    "radio",
+                    "pause_reason_released_still_held",
+                    new
+                    {
+                        released_reason =
+                            reason,
+                        pause_reasons =
+                            PauseReasons.ToArray()
+                    });
+
                 return true;
             }
 
@@ -273,6 +323,15 @@ internal static class RadioController
 
             if (!unmuted)
             {
+                DiagnosticLog.Warning(
+                    "radio",
+                    "unmute_failed",
+                    new
+                    {
+                        released_reason =
+                            reason
+                    });
+
                 return false;
             }
 
@@ -281,6 +340,15 @@ internal static class RadioController
 
             Console.WriteLine(
                 "RADIO -> unmuted");
+
+            DiagnosticLog.Event(
+                "radio",
+                "unmuted",
+                new
+                {
+                    released_reason =
+                        reason
+                });
 
             return true;
         }
@@ -355,6 +423,16 @@ internal static class RadioController
             {
                 Console.Error.WriteLine(
                     $"RADIO -> audio-session control failed: {ex.Message}");
+
+                DiagnosticLog.Error(
+                    "radio",
+                    "audio_session_control_failed",
+                    ex,
+                    new
+                    {
+                        muted,
+                        attempt
+                    });
             }
 
             if (found)
@@ -372,6 +450,14 @@ internal static class RadioController
 
         Console.Error.WriteLine(
             "RADIO -> VLC audio session was not found");
+
+        DiagnosticLog.Warning(
+            "radio",
+            "vlc_audio_session_not_found",
+            new
+            {
+                muted
+            });
 
         return false;
     }
@@ -619,6 +705,15 @@ internal static class RadioController
 
             Console.Error.WriteLine(
                 $"Radio control unavailable: {ex.Message}");
+
+            DiagnosticLog.Error(
+                "radio",
+                "vlc_control_unavailable",
+                ex,
+                new
+                {
+                    command
+                });
 
             return null;
         }
