@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NAudio.CoreAudioApi;
 using NAudio.MediaFoundation;
 using NAudio.Wave;
@@ -11,7 +12,13 @@ internal sealed record AssistantStatus(
     bool HermesConfigured,
     string HermesSessionKey,
     string? HermesSessionId,
+    string WakeEngine,
+    string CommandEngine,
+    long? LastWakeLatencyMs,
     string? LastWakeTranscript,
+    long? LastRemoteCommandLatencyMs,
+    long? LastLocalCommandLatencyMs,
+    string? LastLocalCommandTranscript,
     string? LastCommand,
     string? LastReply,
     string? LastError);
@@ -48,7 +55,9 @@ internal sealed class AssistantMode :
     private readonly SliceDevice _slice;
     private readonly RecordingCoordinator _recording;
     private readonly string? _microphoneName;
-    private readonly WhisperOneShotClient _whisper;
+    private readonly WhisperOneShotClient _remoteWhisper;
+    private readonly LocalEnglishWhisperClient _localWhisper =
+        new();
     private readonly HermesAssistantClient _hermes =
         new();
 
@@ -77,7 +86,13 @@ internal sealed class AssistantMode :
 
     private DateTimeOffset _listeningStarted;
     private DateTimeOffset _lastSpeech;
+    private DateTimeOffset _lastIdleSpeech =
+        DateTimeOffset.MinValue;
 
+    private long? _lastWakeLatencyMs;
+    private long? _lastRemoteCommandLatencyMs;
+    private long? _lastLocalCommandLatencyMs;
+    private string? _lastLocalCommandTranscript;
     private string? _lastWakeTranscript;
     private string? _lastCommand;
     private string? _lastReply;
@@ -100,7 +115,7 @@ internal sealed class AssistantMode :
         _microphoneName =
             microphoneName;
 
-        _whisper =
+        _remoteWhisper =
             new WhisperOneShotClient(
                 whisperUrl);
 
@@ -134,8 +149,20 @@ internal sealed class AssistantMode :
                     _hermes.SessionKey,
                 HermesSessionId:
                     _hermes.SessionId,
+                WakeEngine:
+                    "local tiny.en CPU (remote fallback)",
+                CommandEngine:
+                    "remote large-v3 + local tiny.en shadow",
+                LastWakeLatencyMs:
+                    _lastWakeLatencyMs,
                 LastWakeTranscript:
                     _lastWakeTranscript,
+                LastRemoteCommandLatencyMs:
+                    _lastRemoteCommandLatencyMs,
+                LastLocalCommandLatencyMs:
+                    _lastLocalCommandLatencyMs,
+                LastLocalCommandTranscript:
+                    _lastLocalCommandTranscript,
                 LastCommand:
                     _lastCommand,
                 LastReply:
@@ -210,7 +237,10 @@ internal sealed class AssistantMode :
             $"ASSISTANT -> ECHO wake mode on {_microphone.FriendlyName}");
 
         Console.WriteLine(
-            "ASSISTANT -> v0 wake detection uses short English Whisper probes on the RTX 3090");
+            "ASSISTANT -> wake detection uses local Whisper tiny.en on the Slice CPU (3090 only as fallback)");
+
+        Console.WriteLine(
+            "ASSISTANT -> commands use remote large-v3; local tiny.en runs in shadow mode for speed/accuracy comparison");
 
         Console.WriteLine(
             _hermes.IsConfigured
@@ -227,6 +257,13 @@ internal sealed class AssistantMode :
                     Task.Run(
                         () =>
                             NeuralTtsSpeaker.WarmUpAsync(
+                                cancellationToken),
+                        CancellationToken.None);
+
+                _ =
+                    Task.Run(
+                        () =>
+                            _localWhisper.WarmUpAsync(
                                 cancellationToken),
                         CancellationToken.None);
             }
@@ -366,7 +403,27 @@ internal sealed class AssistantMode :
                 TrimRollingLocked(
                     format);
 
+                float idlePeak =
+                    MeasurePeak(
+                        e.Buffer,
+                        e.BytesRecorded,
+                        format);
+
+                if (idlePeak >=
+                    SpeechPeakThreshold)
+                {
+                    _lastIdleSpeech =
+                        now;
+                }
+
+                bool recentSpeech =
+                    now -
+                        _lastIdleSpeech <=
+                    TimeSpan.FromSeconds(
+                        1.5);
+
                 if (
+                    recentSpeech &&
                     !_probeBusy &&
                     now >=
                         _nextProbe &&
@@ -413,14 +470,57 @@ internal sealed class AssistantMode :
     {
         try
         {
-            string text =
-                await _whisper.TranscribeAsync(
-                    audio,
-                    format,
-                    language: "en",
-                    prompt:
-                        "Echo. Calendar. Schedule. Client. Appointment. Reminder.",
-                    cancellationToken);
+            string text;
+            long latencyMs;
+
+            try
+            {
+                LocalWhisperResult local =
+                    await _localWhisper.TranscribeAsync(
+                        audio,
+                        format,
+                        prompt:
+                            "Echo. Calendar. Schedule. Client. Appointment. Reminder.",
+                        cancellationToken);
+
+                text =
+                    local.Text;
+
+                latencyMs =
+                    local.ElapsedMilliseconds;
+            }
+            catch (Exception ex)
+                when (
+                    ex is not OperationCanceledException ||
+                    !cancellationToken.IsCancellationRequested)
+            {
+                Console.Error.WriteLine(
+                    $"LOCAL WAKE -> tiny.en failed, falling back to 3090: {ex.Message}");
+
+                var watch =
+                    Stopwatch.StartNew();
+
+                text =
+                    await _remoteWhisper.TranscribeAsync(
+                        audio,
+                        format,
+                        language:
+                            "en",
+                        prompt:
+                            "Echo. Calendar. Schedule. Client. Appointment. Reminder.",
+                        cancellationToken);
+
+                watch.Stop();
+
+                latencyMs =
+                    watch.ElapsedMilliseconds;
+            }
+
+            lock (_gate)
+            {
+                _lastWakeLatencyMs =
+                    latencyMs;
+            }
 
             if (!ContainsWakeWord(
                 text))
@@ -477,7 +577,7 @@ internal sealed class AssistantMode :
             {
                 Console.WriteLine();
                 Console.WriteLine(
-                    $"ASSISTANT WAKE -> {text}");
+                    $"ASSISTANT WAKE -> {text} ({latencyMs} ms)");
 
                 await BeginListeningDuckAsync(
                     cancellationToken);
@@ -517,14 +617,74 @@ internal sealed class AssistantMode :
     {
         try
         {
-            string transcript =
-                await _whisper.TranscribeAsync(
+            Task<LocalWhisperResult> localShadow =
+                _localWhisper.TranscribeAsync(
                     audio,
                     format,
-                    language: "en",
                     prompt:
-                        "Echo. Calendar. Schedule. Client. Appointment. Reminder. Cellnet.",
+                        "Echo. Calendar. Schedule. Client. Appointment. Reminder. Email. Radio. Cellnet.",
                     cancellationToken);
+
+            string transcript;
+
+            var remoteWatch =
+                Stopwatch.StartNew();
+
+            try
+            {
+                transcript =
+                    await _remoteWhisper.TranscribeAsync(
+                        audio,
+                        format,
+                        language:
+                            "en",
+                        prompt:
+                            "Echo. Calendar. Schedule. Client. Appointment. Reminder. Email. Radio. Cellnet.",
+                        cancellationToken);
+
+                remoteWatch.Stop();
+
+                lock (_gate)
+                {
+                    _lastRemoteCommandLatencyMs =
+                        remoteWatch.ElapsedMilliseconds;
+                }
+
+                Console.WriteLine(
+                    $"REMOTE STT -> {remoteWatch.ElapsedMilliseconds} ms -> {transcript}");
+            }
+            catch (Exception ex)
+                when (
+                    ex is not OperationCanceledException ||
+                    !cancellationToken.IsCancellationRequested)
+            {
+                remoteWatch.Stop();
+
+                Console.Error.WriteLine(
+                    $"REMOTE STT -> failed after {remoteWatch.ElapsedMilliseconds} ms: {ex.Message}");
+
+                LocalWhisperResult local =
+                    await localShadow;
+
+                transcript =
+                    local.Text;
+
+                lock (_gate)
+                {
+                    _lastLocalCommandLatencyMs =
+                        local.ElapsedMilliseconds;
+
+                    _lastLocalCommandTranscript =
+                        local.Text;
+                }
+
+                Console.WriteLine(
+                    $"LOCAL STT FALLBACK -> {local.ElapsedMilliseconds} ms -> {local.Text}");
+            }
+
+            _ =
+                ObserveLocalShadowAsync(
+                    localShadow);
 
             string command =
                 StripWakeWord(
@@ -634,6 +794,36 @@ internal sealed class AssistantMode :
 
             Console.Error.WriteLine(
                 $"ASSISTANT COMMAND ERROR -> {ex.Message}");
+        }
+    }
+
+    private async Task ObserveLocalShadowAsync(
+        Task<LocalWhisperResult> localTask)
+    {
+        try
+        {
+            LocalWhisperResult local =
+                await localTask;
+
+            lock (_gate)
+            {
+                _lastLocalCommandLatencyMs =
+                    local.ElapsedMilliseconds;
+
+                _lastLocalCommandTranscript =
+                    local.Text;
+            }
+
+            Console.WriteLine(
+                $"LOCAL tiny.en SHADOW -> {local.ElapsedMilliseconds} ms -> {local.Text}");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"LOCAL tiny.en SHADOW -> failed: {ex.Message}");
         }
     }
 
@@ -1116,7 +1306,8 @@ internal sealed class AssistantMode :
 
         _rolling.Dispose();
         _command.Dispose();
-        _whisper.Dispose();
+        _remoteWhisper.Dispose();
+        await _localWhisper.DisposeAsync();
         _hermes.Dispose();
     }
 }
