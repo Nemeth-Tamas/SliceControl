@@ -42,6 +42,9 @@ internal sealed class AudioActivityMonitor
         bool holdingRadio =
             false;
 
+        bool startupAudioRecovered =
+            false;
+
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -63,6 +66,19 @@ internal sealed class AudioActivityMonitor
                         manager.Sessions,
                         out string? source,
                         out float peak);
+
+                if (!startupAudioRecovered)
+                {
+                    startupAudioRecovered =
+                        true;
+
+                    if (!active)
+                    {
+                        await RadioController.ReleasePauseAsync(
+                            "startup-recovery",
+                            cancellationToken);
+                    }
+                }
 
                 if (active)
                 {
