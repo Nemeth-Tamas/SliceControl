@@ -29,14 +29,14 @@ internal static class DiagnosticLog
         $"{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}";
 
     private static readonly string DirectoryPath =
-        Path.Combine(
+        System.IO.Path.Combine(
             Environment.GetFolderPath(
                 Environment.SpecialFolder.LocalApplicationData),
             "SliceAppliance",
             "Logs");
 
     private static readonly string FilePath =
-        Path.Combine(
+        System.IO.Path.Combine(
             DirectoryPath,
             "diagnostics.jsonl");
 
