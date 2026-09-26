@@ -221,6 +221,16 @@ internal sealed class AssistantMode :
         {
             _capture.StartRecording();
 
+            if (_enabled)
+            {
+                _ =
+                    Task.Run(
+                        () =>
+                            NeuralTtsSpeaker.WarmUpAsync(
+                                cancellationToken),
+                        CancellationToken.None);
+            }
+
             await Task.Delay(
                 Timeout.InfiniteTimeSpan,
                 cancellationToken);
@@ -563,10 +573,17 @@ internal sealed class AssistantMode :
                     $"Hermes is not configured. Run Configure-SliceAssistant.ps1. Config: {_hermes.ConfigPath}");
             }
 
-            string reply =
-                await _hermes.SendAsync(
-                    command,
-                    cancellationToken);
+            string reply;
+
+            using (
+                ThinkingSoundPlayer thinking =
+                    ThinkingSoundPlayer.Start())
+            {
+                reply =
+                    await _hermes.SendAsync(
+                        command,
+                        cancellationToken);
+            }
 
             lock (_gate)
             {
@@ -633,6 +650,19 @@ internal sealed class AssistantMode :
         bool restoreMute =
             SafeGetMuted();
 
+        int originalVolume =
+            SafeGetVolumePercent();
+
+        int boostedVolume =
+            Math.Min(
+                100,
+                originalVolume +
+                5);
+
+        bool volumeBoosted =
+            boostedVolume !=
+            originalVolume;
+
         try
         {
             await RadioController.RequestPauseAsync(
@@ -649,14 +679,35 @@ internal sealed class AssistantMode :
                     false);
             }
 
+            if (volumeBoosted)
+            {
+                SystemAudioController.SetVolumePercent(
+                    boostedVolume);
+            }
+
             _slice.Lights.ShowActiveCall();
 
-            await WindowsTtsSpeaker.SpeakAsync(
+            await NeuralTtsSpeaker.SpeakAsync(
                 text,
                 cancellationToken);
         }
         finally
         {
+            if (volumeBoosted)
+            {
+                int currentVolume =
+                    SafeGetVolumePercent();
+
+                if (Math.Abs(
+                    currentVolume -
+                    boostedVolume) <=
+                    1)
+                {
+                    SystemAudioController.SetVolumePercent(
+                        originalVolume);
+                }
+            }
+
             if (restoreMute)
             {
                 SystemAudioController.SetMuted(
@@ -1012,6 +1063,18 @@ internal sealed class AssistantMode :
         }
 
         return peak;
+    }
+
+    private static int SafeGetVolumePercent()
+    {
+        try
+        {
+            return SystemAudioController.VolumePercent;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static bool SafeGetMuted()
