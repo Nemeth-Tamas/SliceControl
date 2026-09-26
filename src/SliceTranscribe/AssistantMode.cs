@@ -681,8 +681,17 @@ internal sealed class AssistantMode :
 
             if (volumeBoosted)
             {
-                SystemAudioController.SetVolumePercent(
-                    boostedVolume);
+                int appliedVolume =
+                    SystemAudioController.SetVolumePercent(
+                        boostedVolume);
+
+                Console.WriteLine(
+                    $"TTS -> volume boost {originalVolume}% -> {appliedVolume}%");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"TTS -> volume already {originalVolume}%; no boost available");
             }
 
             _slice.Lights.ShowActiveCall();
@@ -703,8 +712,17 @@ internal sealed class AssistantMode :
                     boostedVolume) <=
                     1)
                 {
-                    SystemAudioController.SetVolumePercent(
-                        originalVolume);
+                    int restoredVolume =
+                        SystemAudioController.SetVolumePercent(
+                            originalVolume);
+
+                    Console.WriteLine(
+                        $"TTS -> volume restored to {restoredVolume}%");
+                }
+                else
+                {
+                    Console.WriteLine(
+                        $"TTS -> volume changed externally to {currentVolume}%; leaving it alone");
                 }
             }
 
