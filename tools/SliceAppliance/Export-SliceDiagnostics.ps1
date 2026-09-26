@@ -1,9 +1,9 @@
-$ErrorActionPreference = "Continue"
-
 param(
     [int]$Tail = 250,
     [string]$OutputPath = ""
 )
+
+$ErrorActionPreference = "Continue"
 
 $logDirectory = Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs"
 $documentsRoot = [Environment]::GetFolderPath("MyDocuments")
