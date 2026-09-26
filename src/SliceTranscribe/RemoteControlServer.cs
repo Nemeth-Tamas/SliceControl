@@ -1887,13 +1887,20 @@ async function refresh(){
       'Announcement recording: '+(s.announcementRecording?'ON':'OFF');
 
     const a=s.assistant||{};
+    const state=a.State??a.state??'unknown';
+    const configured=a.HermesConfigured??a.hermesConfigured??false;
+    const sessionId=a.HermesSessionId??a.hermesSessionId??null;
+    const sessionKey=a.HermesSessionKey??a.hermesSessionKey??'echo-puck-main';
+    const lastCommand=a.LastCommand??a.lastCommand??'-';
+    const lastReply=a.LastReply??a.lastReply??'-';
+    const lastError=a.LastError??a.lastError??'-';
     document.getElementById('assistantStatus').textContent=
-      'State: '+(a.state||'unknown')+'\n'+
-      'Hermes: '+(a.hermesConfigured?'configured':'NOT CONFIGURED')+'\n'+
-      'Session: '+(a.hermesSessionId||a.hermesSessionKey||'echo-puck-main')+'\n'+
-      'Last command: '+(a.lastCommand||'-')+'\n'+
-      'Last reply: '+(a.lastReply||'-')+'\n'+
-      'Last error: '+(a.lastError||'-');
+      'State: '+state+'\n'+
+      'Hermes: '+(configured?'configured':'NOT CONFIGURED')+'\n'+
+      'Session: '+(sessionId||sessionKey)+'\n'+
+      'Last command: '+lastCommand+'\n'+
+      'Last reply: '+lastReply+'\n'+
+      'Last error: '+lastError;
 
     const m=JSON.stringify(s.microphones||[]);
     if(m!==lastMics){
