@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NAudio.Wave;
 
 namespace SliceTranscribe;
@@ -7,15 +8,36 @@ internal sealed class ThinkingSoundPlayer :
 {
     private readonly WaveOutEvent _output;
 
+    private readonly Stopwatch _lifetime =
+        Stopwatch.StartNew();
+
+    private bool _disposing;
+
     private ThinkingSoundPlayer()
     {
         _output =
             new WaveOutEvent();
 
+        _output.PlaybackStopped +=
+            OnPlaybackStopped;
+
         _output.Init(
             new LoopingThinkingProvider());
 
         _output.Play();
+
+        DiagnosticLog.Event(
+            "thinking_sound",
+            "started",
+            new
+            {
+                sample_rate =
+                    48000,
+                bits =
+                    16,
+                channels =
+                    1
+            });
     }
 
     public static ThinkingSoundPlayer Start()
@@ -25,15 +47,69 @@ internal sealed class ThinkingSoundPlayer :
 
     public void Dispose()
     {
+        _disposing =
+            true;
+
         try
         {
             _output.Stop();
         }
-        catch
+        catch (Exception ex)
         {
+            DiagnosticLog.Error(
+                "thinking_sound",
+                "stop_failed",
+                ex);
         }
 
+        _output.PlaybackStopped -=
+            OnPlaybackStopped;
+
         _output.Dispose();
+
+        _lifetime.Stop();
+
+        DiagnosticLog.Event(
+            "thinking_sound",
+            "disposed",
+            new
+            {
+                lifetime_ms =
+                    _lifetime.ElapsedMilliseconds
+            });
+    }
+
+    private void OnPlaybackStopped(
+        object? sender,
+        StoppedEventArgs e)
+    {
+        if (e.Exception is not null)
+        {
+            DiagnosticLog.Error(
+                "thinking_sound",
+                "playback_failed",
+                e.Exception,
+                new
+                {
+                    disposing =
+                        _disposing,
+                    lifetime_ms =
+                        _lifetime.ElapsedMilliseconds
+                });
+
+            return;
+        }
+
+        DiagnosticLog.Event(
+            "thinking_sound",
+            "playback_stopped",
+            new
+            {
+                disposing =
+                    _disposing,
+                lifetime_ms =
+                    _lifetime.ElapsedMilliseconds
+            });
     }
 
     private sealed class LoopingThinkingProvider :
