@@ -1912,8 +1912,8 @@ async function refresh(){
       'Session: '+(sessionId||sessionKey)+'\n'+
       'Wake: '+wakeEngine+(wakeMs!==null?' ('+wakeMs+' ms)':'')+'\n'+
       'Command: '+commandEngine+'\n'+
-      'Last STT: remote '+(remoteMs??'-')+' ms / local '+(localMs??'-')+' ms\n'+
-      'Local shadow: '+localText+'\n'+
+      'Last STT: remote '+(remoteMs??'-')+' ms / fallback '+(localMs??'-')+' ms\n'+
+      'Local fallback: '+localText+'\n'+
       'Last command: '+lastCommand+'\n'+
       'Last reply: '+lastReply+'\n'+
       'Last error: '+lastError;
