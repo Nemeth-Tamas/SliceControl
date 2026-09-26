@@ -60,8 +60,6 @@ internal sealed class AssistantMode :
         LocalEnglishWhisperClient.CreateTinyEn();
     private readonly LocalEnglishWhisperClient _fallbackWhisper =
         LocalEnglishWhisperClient.CreateBaseEn();
-    private readonly LocalEnglishWhisperClient _shadowWhisper =
-        LocalEnglishWhisperClient.CreateSmallEn();
     private readonly HermesAssistantClient _hermes =
         new();
 
@@ -156,7 +154,7 @@ internal sealed class AssistantMode :
                 WakeEngine:
                     "local tiny.en CPU",
                 CommandEngine:
-                    "remote large-v3 -> base.en fallback; small.en shadow",
+                    "remote large-v3 -> local base.en fallback",
                 LastWakeLatencyMs:
                     _lastWakeLatencyMs,
                 LastWakeTranscript:
@@ -244,7 +242,7 @@ internal sealed class AssistantMode :
             "ASSISTANT -> wake detection uses local Whisper tiny.en on the Slice CPU only");
 
         Console.WriteLine(
-            "ASSISTANT -> commands use remote large-v3; base.en is local fallback; small.en runs in shadow mode");
+            "ASSISTANT -> commands use remote large-v3 with local base.en fallback");
 
         Console.WriteLine(
             _hermes.IsConfigured
@@ -278,12 +276,6 @@ internal sealed class AssistantMode :
                                 cancellationToken),
                         CancellationToken.None);
 
-                _ =
-                    Task.Run(
-                        () =>
-                            _shadowWhisper.WarmUpAsync(
-                                cancellationToken),
-                        CancellationToken.None);
             }
 
             await Task.Delay(
@@ -603,21 +595,7 @@ internal sealed class AssistantMode :
     {
         try
         {
-            var shadowCts =
-                CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken);
-
-            Task<LocalWhisperResult> localShadow =
-                _shadowWhisper.TranscribeAsync(
-                    audio,
-                    format,
-                    prompt:
-                        "Echo. Calendar. Schedule. Client. Appointment. Reminder. Email. Radio. Cellnet.",
-                    shadowCts.Token);
-
             string transcript;
-            bool remoteSucceeded =
-                false;
 
             var remoteWatch =
                 Stopwatch.StartNew();
@@ -636,13 +614,16 @@ internal sealed class AssistantMode :
 
                 remoteWatch.Stop();
 
-                remoteSucceeded =
-                    true;
-
                 lock (_gate)
                 {
                     _lastRemoteCommandLatencyMs =
                         remoteWatch.ElapsedMilliseconds;
+
+                    _lastLocalCommandLatencyMs =
+                        null;
+
+                    _lastLocalCommandTranscript =
+                        null;
                 }
 
                 Console.WriteLine(
@@ -658,20 +639,6 @@ internal sealed class AssistantMode :
                 Console.Error.WriteLine(
                     $"REMOTE STT -> failed after {remoteWatch.ElapsedMilliseconds} ms: {ex.Message}");
 
-                shadowCts.Cancel();
-
-                try
-                {
-                    await localShadow;
-                }
-                catch
-                {
-                }
-                finally
-                {
-                    shadowCts.Dispose();
-                }
-
                 LocalWhisperResult fallback =
                     await _fallbackWhisper.TranscribeAsync(
                         audio,
@@ -683,16 +650,17 @@ internal sealed class AssistantMode :
                 transcript =
                     fallback.Text;
 
+                lock (_gate)
+                {
+                    _lastLocalCommandLatencyMs =
+                        fallback.ElapsedMilliseconds;
+
+                    _lastLocalCommandTranscript =
+                        fallback.Text;
+                }
+
                 Console.WriteLine(
                     $"LOCAL base.en FALLBACK -> {fallback.ElapsedMilliseconds} ms -> {fallback.Text}");
-            }
-
-            if (remoteSucceeded)
-            {
-                _ =
-                    ObserveLocalShadowAsync(
-                        localShadow,
-                        shadowCts);
             }
 
             string command =
@@ -803,41 +771,6 @@ internal sealed class AssistantMode :
 
             Console.Error.WriteLine(
                 $"ASSISTANT COMMAND ERROR -> {ex.Message}");
-        }
-    }
-
-    private async Task ObserveLocalShadowAsync(
-        Task<LocalWhisperResult> localTask,
-        CancellationTokenSource shadowCts)
-    {
-        try
-        {
-            LocalWhisperResult local =
-                await localTask;
-
-            lock (_gate)
-            {
-                _lastLocalCommandLatencyMs =
-                    local.ElapsedMilliseconds;
-
-                _lastLocalCommandTranscript =
-                    local.Text;
-            }
-
-            Console.WriteLine(
-                $"LOCAL small.en SHADOW -> {local.ElapsedMilliseconds} ms -> {local.Text}");
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(
-                $"LOCAL small.en SHADOW -> failed: {ex.Message}");
-        }
-        finally
-        {
-            shadowCts.Dispose();
         }
     }
 
@@ -1323,7 +1256,6 @@ internal sealed class AssistantMode :
         _remoteWhisper.Dispose();
         await _wakeWhisper.DisposeAsync();
         await _fallbackWhisper.DisposeAsync();
-        await _shadowWhisper.DisposeAsync();
         _hermes.Dispose();
     }
 }
