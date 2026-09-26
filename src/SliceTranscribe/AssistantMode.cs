@@ -14,6 +14,13 @@ internal sealed record AssistantStatus(
     string? HermesSessionId,
     string WakeEngine,
     string CommandEngine,
+    string? MicrophoneName,
+    string? CaptureFormat,
+    long? CaptureAgeMs,
+    long CaptureCallbackCount,
+    long CaptureBytes,
+    double LastCapturePeak,
+    int CaptureRestartCount,
     long? LastWakeLatencyMs,
     string? LastWakeTranscript,
     long? LastRemoteCommandLatencyMs,
@@ -98,6 +105,11 @@ internal sealed class AssistantMode :
     private DateTimeOffset _lastCaptureData =
         DateTimeOffset.MinValue;
 
+    private long _captureCallbackCount;
+    private long _captureBytes;
+    private double _lastCapturePeak;
+    private int _captureRestartCount;
+
     private long? _lastWakeLatencyMs;
     private long? _lastRemoteCommandLatencyMs;
     private long? _lastLocalCommandLatencyMs;
@@ -162,6 +174,28 @@ internal sealed class AssistantMode :
                     "local tiny.en CPU",
                 CommandEngine:
                     "remote large-v3 -> local base.en fallback",
+                MicrophoneName:
+                    _microphone?.FriendlyName,
+                CaptureFormat:
+                    _captureFormat?.ToString(),
+                CaptureAgeMs:
+                    _lastCaptureData == DateTimeOffset.MinValue
+                        ? null
+                        : Math.Max(
+                            0,
+                            (long)(
+                                DateTimeOffset.UtcNow -
+                                _lastCaptureData).TotalMilliseconds),
+                CaptureCallbackCount:
+                    Interlocked.Read(
+                        ref _captureCallbackCount),
+                CaptureBytes:
+                    Interlocked.Read(
+                        ref _captureBytes),
+                LastCapturePeak:
+                    _lastCapturePeak,
+                CaptureRestartCount:
+                    _captureRestartCount,
                 LastWakeLatencyMs:
                     _lastWakeLatencyMs,
                 LastWakeTranscript:
@@ -220,6 +254,17 @@ internal sealed class AssistantMode :
             enabled
                 ? "ASSISTANT -> enabled, wake word ECHO"
                 : "ASSISTANT -> disabled");
+
+        DiagnosticLog.Event(
+            "assistant",
+            enabled
+                ? "enabled"
+                : "disabled",
+            new
+            {
+                state =
+                    GetStatus().State
+            });
     }
 
     public async Task RunAsync(
@@ -238,6 +283,25 @@ internal sealed class AssistantMode :
             _hermes.IsConfigured
                 ? $"ASSISTANT -> Hermes ready; session key {_hermes.SessionKey}"
                 : $"ASSISTANT -> Hermes not configured; run Configure-SliceAssistant.ps1 ({_hermes.ConfigPath})");
+
+        DiagnosticLog.Event(
+            "assistant",
+            "startup",
+            new
+            {
+                enabled =
+                    _enabled,
+                hermes_configured =
+                    _hermes.IsConfigured,
+                session_key =
+                    _hermes.SessionKey,
+                session_id =
+                    _hermes.SessionId,
+                wake_engine =
+                    "tiny.en-cpu",
+                command_engine =
+                    "remote-large-v3-with-base.en-fallback"
+            });
 
         if (_enabled)
         {
@@ -321,6 +385,32 @@ internal sealed class AssistantMode :
                         ? $"ASSISTANT -> ECHO wake mode on {microphone.FriendlyName}"
                         : $"ASSISTANT MIC -> recovered on {microphone.FriendlyName} (restart {restartCount})");
 
+                _captureRestartCount =
+                    restartCount;
+
+                DiagnosticLog.Event(
+                    "mic",
+                    restartCount == 0
+                        ? "capture_opened"
+                        : "capture_recovered",
+                    new
+                    {
+                        device =
+                            microphone.FriendlyName,
+                        device_id =
+                            microphone.ID,
+                        format =
+                            capture.WaveFormat.ToString(),
+                        restart_count =
+                            restartCount,
+                        callback_count =
+                            Interlocked.Read(
+                                ref _captureCallbackCount),
+                        captured_bytes =
+                            Interlocked.Read(
+                                ref _captureBytes)
+                    });
+
                 Exception? stopError =
                     null;
 
@@ -370,8 +460,38 @@ internal sealed class AssistantMode :
                 {
                     if (stalled)
                     {
+                        long callbackAgeMs =
+                            _lastCaptureData == DateTimeOffset.MinValue
+                                ? -1
+                                : (long)(
+                                    DateTimeOffset.UtcNow -
+                                    _lastCaptureData).TotalMilliseconds;
+
                         Console.Error.WriteLine(
                             $"ASSISTANT MIC -> capture stalled for {CaptureStallTimeout.TotalSeconds:0} s; reopening in 1 s");
+
+                        DiagnosticLog.Warning(
+                            "mic",
+                            "capture_stalled",
+                            new
+                            {
+                                callback_age_ms =
+                                    callbackAgeMs,
+                                callback_count =
+                                    Interlocked.Read(
+                                        ref _captureCallbackCount),
+                                captured_bytes =
+                                    Interlocked.Read(
+                                        ref _captureBytes),
+                                last_peak =
+                                    _lastCapturePeak,
+                                assistant_state =
+                                    GetStatus().State,
+                                recording_active =
+                                    _recording.IsRecording,
+                                restart_count =
+                                    restartCount
+                            });
                     }
                     else
                     {
@@ -379,6 +499,46 @@ internal sealed class AssistantMode :
                             stopError is null
                                 ? "ASSISTANT MIC -> capture stopped unexpectedly; reopening in 1 s"
                                 : $"ASSISTANT MIC -> capture failed: {stopError.GetType().Name}: {stopError.Message}; reopening in 1 s");
+
+                        if (stopError is null)
+                        {
+                            DiagnosticLog.Warning(
+                                "mic",
+                                "capture_stopped",
+                                new
+                                {
+                                    callback_count =
+                                        Interlocked.Read(
+                                            ref _captureCallbackCount),
+                                    captured_bytes =
+                                        Interlocked.Read(
+                                            ref _captureBytes),
+                                    last_peak =
+                                        _lastCapturePeak,
+                                    assistant_state =
+                                        GetStatus().State
+                                });
+                        }
+                        else
+                        {
+                            DiagnosticLog.Error(
+                                "mic",
+                                "capture_failed",
+                                stopError,
+                                new
+                                {
+                                    callback_count =
+                                        Interlocked.Read(
+                                            ref _captureCallbackCount),
+                                    captured_bytes =
+                                        Interlocked.Read(
+                                            ref _captureBytes),
+                                    last_peak =
+                                        _lastCapturePeak,
+                                    assistant_state =
+                                        GetStatus().State
+                                });
+                        }
                     }
 
                     ResetCaptureState();
@@ -395,6 +555,20 @@ internal sealed class AssistantMode :
             {
                 Console.Error.WriteLine(
                     $"ASSISTANT MIC -> open/capture error: {ex.GetType().Name}: {ex.Message}; reopening in 1 s");
+
+                DiagnosticLog.Error(
+                    "mic",
+                    "open_or_capture_error",
+                    ex,
+                    new
+                    {
+                        requested_microphone =
+                            _microphoneName,
+                        restart_count =
+                            restartCount,
+                        assistant_state =
+                            GetStatus().State
+                    });
 
                 ResetCaptureState();
 
@@ -518,11 +692,36 @@ internal sealed class AssistantMode :
             return;
         }
 
+        Interlocked.Increment(
+            ref _captureCallbackCount);
+
+        Interlocked.Add(
+            ref _captureBytes,
+            e.BytesRecorded);
+
+        float callbackPeak =
+            MeasurePeak(
+                e.Buffer,
+                e.BytesRecorded,
+                format);
+
+        _lastCapturePeak =
+            callbackPeak;
+
         byte[]? wakeSnapshot =
             null;
 
         byte[]? commandSnapshot =
             null;
+
+        string? commandFinishReason =
+            null;
+
+        long commandListenAgeMs =
+            0;
+
+        long commandSilenceAgeMs =
+            0;
 
         DateTimeOffset now =
             DateTimeOffset.UtcNow;
@@ -548,13 +747,7 @@ internal sealed class AssistantMode :
                     0,
                     e.BytesRecorded);
 
-                float peak =
-                    MeasurePeak(
-                        e.Buffer,
-                        e.BytesRecorded,
-                        format);
-
-                if (peak >=
+                if (callbackPeak >=
                     SpeechPeakThreshold)
                 {
                     _commandSpeechDetected =
@@ -587,6 +780,20 @@ internal sealed class AssistantMode :
                     commandSnapshot =
                         _command.ToArray();
 
+                    commandFinishReason =
+                        silenceFinished
+                            ? "silence"
+                            : "timeout";
+
+                    commandListenAgeMs =
+                        (long)
+                            listenAge.TotalMilliseconds;
+
+                    commandSilenceAgeMs =
+                        (long)(
+                            now -
+                            _lastSpeech).TotalMilliseconds;
+
                     _command.SetLength(
                         0);
 
@@ -607,13 +814,7 @@ internal sealed class AssistantMode :
                 TrimRollingLocked(
                     format);
 
-                float idlePeak =
-                    MeasurePeak(
-                        e.Buffer,
-                        e.BytesRecorded,
-                        format);
-
-                if (idlePeak >=
+                if (callbackPeak >=
                     SpeechPeakThreshold)
                 {
                     _lastIdleSpeech =
@@ -659,6 +860,28 @@ internal sealed class AssistantMode :
 
         if (commandSnapshot is not null)
         {
+            DiagnosticLog.Event(
+                "assistant",
+                "command_capture_complete",
+                new
+                {
+                    reason =
+                        commandFinishReason,
+                    audio_bytes =
+                        commandSnapshot.Length,
+                    listen_age_ms =
+                        commandListenAgeMs,
+                    silence_age_ms =
+                        commandSilenceAgeMs,
+                    speech_detected =
+                        _commandSpeechDetected,
+                    last_peak =
+                        callbackPeak,
+                    callback_count =
+                        Interlocked.Read(
+                            ref _captureCallbackCount)
+                });
+
             _ =
                 ProcessCommandAsync(
                     commandSnapshot,
@@ -751,6 +974,27 @@ internal sealed class AssistantMode :
                 Console.WriteLine(
                     $"ASSISTANT WAKE -> {text} ({latencyMs} ms)");
 
+                DiagnosticLog.Event(
+                    "assistant",
+                    "wake_detected",
+                    new
+                    {
+                        transcript =
+                            text,
+                        wake_latency_ms =
+                            latencyMs,
+                        pre_roll_bytes =
+                            _command.Length,
+                        command_speech_already_detected =
+                            _commandSpeechDetected,
+                        capture_age_ms =
+                            _lastCaptureData == DateTimeOffset.MinValue
+                                ? -1
+                                : (long)(
+                                    DateTimeOffset.UtcNow -
+                                    _lastCaptureData).TotalMilliseconds
+                    });
+
                 await BeginListeningDuckAsync(
                     cancellationToken);
 
@@ -771,6 +1015,16 @@ internal sealed class AssistantMode :
 
             Console.Error.WriteLine(
                 $"ASSISTANT WAKE ERROR -> {ex.Message}");
+
+            DiagnosticLog.Error(
+                "assistant",
+                "wake_error",
+                ex,
+                new
+                {
+                    state =
+                        GetStatus().State
+                });
         }
         finally
         {
@@ -790,6 +1044,17 @@ internal sealed class AssistantMode :
         try
         {
             string transcript;
+
+            DiagnosticLog.Event(
+                "stt",
+                "remote_start",
+                new
+                {
+                    audio_bytes =
+                        audio.Length,
+                    format =
+                        format.ToString()
+                });
 
             var remoteWatch =
                 Stopwatch.StartNew();
@@ -822,6 +1087,19 @@ internal sealed class AssistantMode :
 
                 Console.WriteLine(
                     $"REMOTE STT -> {remoteWatch.ElapsedMilliseconds} ms -> {transcript}");
+
+                DiagnosticLog.Event(
+                    "stt",
+                    "remote_complete",
+                    new
+                    {
+                        latency_ms =
+                            remoteWatch.ElapsedMilliseconds,
+                        transcript =
+                            transcript,
+                        transcript_chars =
+                            transcript.Length
+                    });
             }
             catch (Exception ex)
                 when (
@@ -832,6 +1110,29 @@ internal sealed class AssistantMode :
 
                 Console.Error.WriteLine(
                     $"REMOTE STT -> failed after {remoteWatch.ElapsedMilliseconds} ms: {ex.Message}");
+
+                DiagnosticLog.Error(
+                    "stt",
+                    "remote_failed",
+                    ex,
+                    new
+                    {
+                        latency_ms =
+                            remoteWatch.ElapsedMilliseconds,
+                        fallback =
+                            "base.en"
+                    });
+
+                DiagnosticLog.Event(
+                    "stt",
+                    "fallback_start",
+                    new
+                    {
+                        model =
+                            "base.en",
+                        audio_bytes =
+                            audio.Length
+                    });
 
                 LocalWhisperResult fallback =
                     await _fallbackWhisper.TranscribeAsync(
@@ -855,6 +1156,21 @@ internal sealed class AssistantMode :
 
                 Console.WriteLine(
                     $"LOCAL base.en FALLBACK -> {fallback.ElapsedMilliseconds} ms -> {fallback.Text}");
+
+                DiagnosticLog.Event(
+                    "stt",
+                    "fallback_complete",
+                    new
+                    {
+                        model =
+                            "base.en",
+                        latency_ms =
+                            fallback.ElapsedMilliseconds,
+                        transcript =
+                            fallback.Text,
+                        transcript_chars =
+                            fallback.Text.Length
+                    });
             }
 
             string command =
@@ -898,6 +1214,17 @@ internal sealed class AssistantMode :
             Console.WriteLine(
                 $"ASSISTANT COMMAND -> {command}");
 
+            DiagnosticLog.Event(
+                "assistant",
+                "command_ready",
+                new
+                {
+                    command =
+                        command,
+                    chars =
+                        command.Length
+                });
+
             if (!_hermes.IsConfigured)
             {
                 throw new InvalidOperationException(
@@ -905,6 +1232,22 @@ internal sealed class AssistantMode :
             }
 
             string reply;
+
+            var hermesWatch =
+                Stopwatch.StartNew();
+
+            DiagnosticLog.Event(
+                "hermes",
+                "request_start",
+                new
+                {
+                    session_id =
+                        _hermes.SessionId,
+                    session_key =
+                        _hermes.SessionKey,
+                    command_chars =
+                        command.Length
+                });
 
             using (
                 ThinkingSoundPlayer thinking =
@@ -915,6 +1258,23 @@ internal sealed class AssistantMode :
                         command,
                         cancellationToken);
             }
+
+            hermesWatch.Stop();
+
+            DiagnosticLog.Event(
+                "hermes",
+                "request_complete",
+                new
+                {
+                    session_id =
+                        _hermes.SessionId,
+                    latency_ms =
+                        hermesWatch.ElapsedMilliseconds,
+                    reply_chars =
+                        reply.Length,
+                    reply =
+                        reply
+                });
 
             lock (_gate)
             {
@@ -965,6 +1325,18 @@ internal sealed class AssistantMode :
 
             Console.Error.WriteLine(
                 $"ASSISTANT COMMAND ERROR -> {ex.Message}");
+
+            DiagnosticLog.Error(
+                "assistant",
+                "command_error",
+                ex,
+                new
+                {
+                    state =
+                        GetStatus().State,
+                    listen_duck_held =
+                        _listenDuckHeld
+                });
         }
     }
 
@@ -993,6 +1365,24 @@ internal sealed class AssistantMode :
         bool volumeBoosted =
             boostedVolume !=
             originalVolume;
+
+        var ttsWatch =
+            Stopwatch.StartNew();
+
+        DiagnosticLog.Event(
+            "tts",
+            "speak_start",
+            new
+            {
+                chars =
+                    text.Length,
+                original_volume =
+                    originalVolume,
+                target_volume =
+                    boostedVolume,
+                restore_mute =
+                    restoreMute
+            });
 
         try
         {
@@ -1077,6 +1467,21 @@ internal sealed class AssistantMode :
                     false;
             }
 
+            ttsWatch.Stop();
+
+            DiagnosticLog.Event(
+                "tts",
+                "speak_complete",
+                new
+                {
+                    latency_ms =
+                        ttsWatch.ElapsedMilliseconds,
+                    final_volume =
+                        SafeGetVolumePercent(),
+                    master_muted =
+                        SafeGetMuted()
+                });
+
             RefreshLights();
         }
     }
@@ -1100,6 +1505,19 @@ internal sealed class AssistantMode :
                 held ||
                 phoneHeld;
         }
+
+        DiagnosticLog.Event(
+            "audio",
+            "echo_listen_duck_acquired",
+            new
+            {
+                radio =
+                    held,
+                phone =
+                    phoneHeld,
+                held =
+                    _listenDuckHeld
+            });
     }
 
     private async Task EndListeningDuckAsync()
@@ -1127,6 +1545,10 @@ internal sealed class AssistantMode :
         await RadioController.ReleasePauseAsync(
             "echo-listen",
             CancellationToken.None);
+
+        DiagnosticLog.Event(
+            "audio",
+            "echo_listen_duck_released");
     }
 
     private void TrimRollingLocked(
@@ -1183,6 +1605,11 @@ internal sealed class AssistantMode :
         {
             Console.Error.WriteLine(
                 $"ASSISTANT LIGHTS -> unavailable: {ex.GetType().Name}: {ex.Message}");
+
+            DiagnosticLog.Error(
+                "lights",
+                "assistant_indicator_failed",
+                ex);
         }
     }
 
