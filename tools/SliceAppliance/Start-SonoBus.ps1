@@ -75,8 +75,10 @@ if (-not $sonoBus) {
 
 $userName = if ($config.Username) { [string]$config.Username } else { "Slice" }
 
+# SonoBus headless mode exits immediately on the tested Windows build.
+# The normal standalone application supports the same command-line group
+# auto-connect options and initializes the Windows audio device reliably.
 $arguments = @(
-    "--headless",
     "--group", [string]$config.Group,
     "--username", $userName
 )
@@ -109,7 +111,7 @@ if ($config.SetupFile) {
     }
 }
 
-Write-SonoBusLog ("Watching SonoBus group '{0}' as '{1}'." -f $config.Group, $userName)
+Write-SonoBusLog ("Watching SonoBus group '{0}' as '{1}' in Windows GUI mode." -f $config.Group, $userName)
 
 $hadRunningInstance = $false
 
@@ -135,7 +137,7 @@ while ($true) {
             $hadRunningInstance = $false
         }
 
-        $launched = Start-Process -FilePath $sonoBus -ArgumentList $arguments -WindowStyle Hidden -PassThru
+        $launched = Start-Process -FilePath $sonoBus -ArgumentList $arguments -WindowStyle Minimized -PassThru
         Write-SonoBusLog ("SonoBus launch requested (PID {0})." -f $launched.Id)
 
         Start-Sleep -Seconds 2
