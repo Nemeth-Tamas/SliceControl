@@ -483,6 +483,12 @@ internal sealed class RemoteControlServer :
                     new
                     {
                         state,
+                        preset =
+                            RadioController.CurrentPreset,
+                        station =
+                            RadioController.CurrentStation,
+                        streamUrl =
+                            RadioController.CurrentUrl,
                         nowPlaying
                     });
 
