@@ -73,11 +73,6 @@ if (-not $sonoBus) {
     exit 0
 }
 
-Get-Process -Name "SonoBus" -ErrorAction SilentlyContinue |
-    Stop-Process -Force -ErrorAction SilentlyContinue
-
-Start-Sleep -Milliseconds 300
-
 $userName = if ($config.Username) { [string]$config.Username } else { "Slice" }
 
 $arguments = @(
@@ -114,20 +109,53 @@ if ($config.SetupFile) {
     }
 }
 
-Write-SonoBusLog ("Starting SonoBus group '{0}' as '{1}'." -f $config.Group, $userName)
+Write-SonoBusLog ("Watching SonoBus group '{0}' as '{1}'." -f $config.Group, $userName)
+
+$hadRunningInstance = $false
 
 while ($true) {
     try {
-        $process = Start-Process -FilePath $sonoBus -ArgumentList $arguments -WindowStyle Hidden -PassThru
-        Write-SonoBusLog ("SonoBus started (PID {0})." -f $process.Id)
+        $running = @(
+            Get-Process -Name "SonoBus" -ErrorAction SilentlyContinue
+        )
 
-        $process.WaitForExit()
+        if ($running.Count -gt 0) {
+            if (-not $hadRunningInstance) {
+                $ids = ($running | ForEach-Object { $_.Id }) -join ", "
+                Write-SonoBusLog ("SonoBus is running (PID(s) {0})." -f $ids)
+                $hadRunningInstance = $true
+            }
 
-        Write-SonoBusLog ("SonoBus exited (PID {0}); restarting in 3 seconds." -f $process.Id)
+            Start-Sleep -Seconds 2
+            continue
+        }
+
+        if ($hadRunningInstance) {
+            Write-SonoBusLog "SonoBus is no longer running; relaunching."
+            $hadRunningInstance = $false
+        }
+
+        $launched = Start-Process -FilePath $sonoBus -ArgumentList $arguments -WindowStyle Hidden -PassThru
+        Write-SonoBusLog ("SonoBus launch requested (PID {0})." -f $launched.Id)
+
+        Start-Sleep -Seconds 2
+
+        $runningAfterLaunch = @(
+            Get-Process -Name "SonoBus" -ErrorAction SilentlyContinue
+        )
+
+        if ($runningAfterLaunch.Count -gt 0) {
+            $ids = ($runningAfterLaunch | ForEach-Object { $_.Id }) -join ", "
+            Write-SonoBusLog ("SonoBus healthy after launch (PID(s) {0})." -f $ids)
+            $hadRunningInstance = $true
+        }
+        else {
+            Write-SonoBusLog "SonoBus launch produced no surviving process; retrying in 3 seconds."
+            Start-Sleep -Seconds 3
+        }
     }
     catch {
         Write-SonoBusLog ("SonoBus launch/watch error: {0}" -f $_.Exception.Message)
+        Start-Sleep -Seconds 3
     }
-
-    Start-Sleep -Seconds 3
 }
