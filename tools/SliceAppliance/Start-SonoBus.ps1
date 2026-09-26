@@ -54,16 +54,19 @@ function Find-SonoBus {
     return $null
 }
 
-if (-not (Test-Path $configPath)) {
-    Write-SonoBusLog "SonoBus config not found; task will remain idle."
-    exit 0
-}
+$configuredGroup = "(SonoBus last group)"
 
-$config = Get-Content -Raw -Path $configPath | ConvertFrom-Json
+if (Test-Path $configPath) {
+    try {
+        $config = Get-Content -Raw -Path $configPath | ConvertFrom-Json
 
-if (-not $config.Group) {
-    Write-SonoBusLog "SonoBus config is missing Group."
-    exit 0
+        if ($config.Group) {
+            $configuredGroup = [string]$config.Group
+        }
+    }
+    catch {
+        Write-SonoBusLog ("Could not read legacy SonoBus config label: {0}" -f $_.Exception.Message)
+    }
 }
 
 $sonoBus = Find-SonoBus
@@ -73,45 +76,12 @@ if (-not $sonoBus) {
     exit 0
 }
 
-$userName = if ($config.Username) { [string]$config.Username } else { "Slice" }
+# On the tested Windows SonoBus build, command-line group auto-connect
+# is unreliable. SonoBus's built-in "Auto-Reconnect to Last Group"
+# setting is the source of truth. Launch the normal application only.
+$arguments = @()
 
-# SonoBus headless mode exits immediately on the tested Windows build.
-# The normal standalone application supports the same command-line group
-# auto-connect options and initializes the Windows audio device reliably.
-$arguments = @(
-    "--group", [string]$config.Group,
-    "--username", $userName
-)
-
-if ($config.Password) {
-    $arguments += @(
-        "--group-password",
-        [string]$config.Password
-    )
-}
-
-if ($config.ConnectionServer) {
-    $arguments += @(
-        "--connectionserver",
-        [string]$config.ConnectionServer
-    )
-}
-
-if ($config.SetupFile) {
-    $setupPath = [Environment]::ExpandEnvironmentVariables([string]$config.SetupFile)
-
-    if (Test-Path $setupPath) {
-        $arguments += @(
-            "--load-setup",
-            $setupPath
-        )
-    }
-    else {
-        Write-SonoBusLog ("Configured setup file does not exist: {0}" -f $setupPath)
-    }
-}
-
-Write-SonoBusLog ("Watching SonoBus group '{0}' as '{1}' in Windows GUI mode." -f $config.Group, $userName)
+Write-SonoBusLog ("Watching SonoBus in Windows GUI mode; expected last group '{0}'." -f $configuredGroup)
 
 $hadRunningInstance = $false
 
