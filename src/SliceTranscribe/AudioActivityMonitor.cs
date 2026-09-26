@@ -1,11 +1,15 @@
+using System.Diagnostics;
 using NAudio.CoreAudioApi;
 
 namespace SliceTranscribe;
 
 internal sealed class AudioActivityMonitor
 {
-    private const string RadioPauseReason =
+    private const string PhoneRadioPauseReason =
         "phone-media";
+
+    private const string SonoBusRadioPauseReason =
+        "sonobus";
 
     private const float ActivityThreshold =
         0.003f;
@@ -39,7 +43,13 @@ internal sealed class AudioActivityMonitor
         DateTimeOffset? lastPhoneAudio =
             null;
 
-        bool holdingRadio =
+        DateTimeOffset? lastSonoBusAudio =
+            null;
+
+        bool holdingPhoneRadio =
+            false;
+
+        bool holdingSonoBusRadio =
             false;
 
         bool startupAudioRecovered =
@@ -61,18 +71,24 @@ internal sealed class AudioActivityMonitor
                         now;
                 }
 
-                bool active =
+                bool phoneActive =
                     TryFindPhoneA2dpAudio(
                         manager.Sessions,
                         out string? source,
                         out float peak);
+
+                bool sonoBusActive =
+                    TryFindSonoBusAudio(
+                        manager.Sessions,
+                        out float sonoBusPeak);
 
                 if (!startupAudioRecovered)
                 {
                     startupAudioRecovered =
                         true;
 
-                    if (!active)
+                    if (!phoneActive &&
+                        !sonoBusActive)
                     {
                         await RadioController.ReleasePauseAsync(
                             "startup-recovery",
@@ -80,7 +96,7 @@ internal sealed class AudioActivityMonitor
                     }
                 }
 
-                if (active)
+                if (phoneActive)
                 {
                     lastPhoneAudio =
                         now;
@@ -91,14 +107,14 @@ internal sealed class AudioActivityMonitor
                             cancellationToken);
                     }
 
-                    if (!holdingRadio)
+                    if (!holdingPhoneRadio)
                     {
-                        holdingRadio =
+                        holdingPhoneRadio =
                             await RadioController.RequestPauseAsync(
-                                RadioPauseReason,
+                                PhoneRadioPauseReason,
                                 cancellationToken);
 
-                        if (holdingRadio)
+                        if (holdingPhoneRadio)
                         {
                             Console.WriteLine(
                                 $"PHONE MEDIA ACTIVE -> {source} ({peak:P1})");
@@ -106,19 +122,55 @@ internal sealed class AudioActivityMonitor
                     }
                 }
                 else if (
-                    holdingRadio &&
+                    holdingPhoneRadio &&
                     lastPhoneAudio is not null &&
                     now - lastPhoneAudio.Value >=
                         _resumeDelay)
                 {
                     await RadioController.ReleasePauseAsync(
-                        RadioPauseReason,
+                        PhoneRadioPauseReason,
                         cancellationToken);
 
-                    holdingRadio =
+                    holdingPhoneRadio =
                         false;
 
                     lastPhoneAudio =
+                        null;
+                }
+
+                if (sonoBusActive)
+                {
+                    lastSonoBusAudio =
+                        now;
+
+                    if (!holdingSonoBusRadio)
+                    {
+                        holdingSonoBusRadio =
+                            await RadioController.RequestPauseAsync(
+                                SonoBusRadioPauseReason,
+                                cancellationToken);
+
+                        if (holdingSonoBusRadio)
+                        {
+                            Console.WriteLine(
+                                $"SONOBUS AUDIO ACTIVE -> {sonoBusPeak:P1}");
+                        }
+                    }
+                }
+                else if (
+                    holdingSonoBusRadio &&
+                    lastSonoBusAudio is not null &&
+                    now - lastSonoBusAudio.Value >=
+                        _resumeDelay)
+                {
+                    await RadioController.ReleasePauseAsync(
+                        SonoBusRadioPauseReason,
+                        cancellationToken);
+
+                    holdingSonoBusRadio =
+                        false;
+
+                    lastSonoBusAudio =
                         null;
                 }
 
@@ -133,12 +185,25 @@ internal sealed class AudioActivityMonitor
         }
         finally
         {
-            if (holdingRadio)
+            if (holdingPhoneRadio)
             {
                 try
                 {
                     await RadioController.ReleasePauseAsync(
-                        RadioPauseReason,
+                        PhoneRadioPauseReason,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                }
+            }
+
+            if (holdingSonoBusRadio)
+            {
+                try
+                {
+                    await RadioController.ReleasePauseAsync(
+                        SonoBusRadioPauseReason,
                         CancellationToken.None);
                 }
                 catch
@@ -146,6 +211,71 @@ internal sealed class AudioActivityMonitor
                 }
             }
         }
+    }
+
+    private static bool TryFindSonoBusAudio(
+        SessionCollection sessions,
+        out float peak)
+    {
+        peak =
+            0;
+
+        for (int i = 0;
+             i < sessions.Count;
+             i++)
+        {
+            try
+            {
+                using AudioSessionControl session =
+                    sessions[i];
+
+                uint processId =
+                    session.GetProcessID;
+
+                if (processId == 0)
+                {
+                    continue;
+                }
+
+                using Process process =
+                    Process.GetProcessById(
+                        checked(
+                            (int)processId));
+
+                if (!process.ProcessName.Equals(
+                    "SonoBus",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (session.SimpleAudioVolume.Mute)
+                {
+                    continue;
+                }
+
+                float sessionPeak =
+                    session.AudioMeterInformation.MasterPeakValue;
+
+                if (sessionPeak <
+                    ActivityThreshold)
+                {
+                    continue;
+                }
+
+                peak =
+                    Math.Max(
+                        peak,
+                        sessionPeak);
+            }
+            catch
+            {
+                // Sessions/processes can disappear while enumerating them.
+            }
+        }
+
+        return peak >=
+            ActivityThreshold;
     }
 
     private static bool TryFindPhoneA2dpAudio(
