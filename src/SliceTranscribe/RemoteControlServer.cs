@@ -19,6 +19,7 @@ internal sealed class RemoteControlServer :
 
     private readonly SliceDevice _slice;
     private readonly RecordingCoordinator _recording;
+    private readonly AssistantMode _assistant;
     private readonly HttpListener _listener =
         new();
 
@@ -43,6 +44,7 @@ internal sealed class RemoteControlServer :
     public RemoteControlServer(
         SliceDevice slice,
         RecordingCoordinator recording,
+        AssistantMode assistant,
         int port = 8787)
     {
         _slice =
@@ -50,6 +52,9 @@ internal sealed class RemoteControlServer :
 
         _recording =
             recording;
+
+        _assistant =
+            assistant;
 
         _announcementDirectory =
             Path.Combine(
@@ -187,6 +192,47 @@ internal sealed class RemoteControlServer :
                     context.Response,
                     200,
                     BuildStatus());
+
+                return;
+            }
+
+            if (path == "/api/assistant/status" &&
+                context.Request.HttpMethod == "GET")
+            {
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    _assistant.GetStatus());
+
+                return;
+            }
+
+            if (path == "/api/assistant/enabled" &&
+                context.Request.HttpMethod == "POST")
+            {
+                if (!bool.TryParse(
+                    context.Request.QueryString["value"],
+                    out bool enabled))
+                {
+                    await WriteJsonAsync(
+                        context.Response,
+                        400,
+                        new
+                        {
+                            error =
+                                "Missing or invalid enabled value."
+                        });
+
+                    return;
+                }
+
+                _assistant.SetEnabled(
+                    enabled);
+
+                await WriteJsonAsync(
+                    context.Response,
+                    200,
+                    _assistant.GetStatus());
 
                 return;
             }
@@ -779,7 +825,10 @@ internal sealed class RemoteControlServer :
                 GetMicrophones(),
 
             announcements =
-                GetAnnouncements()
+                GetAnnouncements(),
+
+            assistant =
+                _assistant.GetStatus()
         };
     }
 
@@ -1756,6 +1805,16 @@ button.danger{background:#652d2d}
 </div>
 
 <div class="card">
+<h2>Assistant</h2>
+<div id="assistantStatus">Loading…</div>
+<div class="row">
+<button onclick="setAssistant(true)">Wake listening ON</button>
+<button class="danger" onclick="setAssistant(false)">Wake listening OFF</button>
+</div>
+<div class="small">Say “Echo” followed by your command. English STT → Hermes → English TTS.</div>
+</div>
+
+<div class="card">
 <h2>Recording</h2>
 <div class="row">
 <button onclick="post('/api/record/start')">Start</button>
@@ -1827,6 +1886,15 @@ async function refresh(){
       'Announcement: '+(s.announcement?'PLAYING':'OFF')+'\n'+
       'Announcement recording: '+(s.announcementRecording?'ON':'OFF');
 
+    const a=s.assistant||{};
+    document.getElementById('assistantStatus').textContent=
+      'State: '+(a.state||'unknown')+'\n'+
+      'Hermes: '+(a.hermesConfigured?'configured':'NOT CONFIGURED')+'\n'+
+      'Session: '+(a.hermesSessionId||a.hermesSessionKey||'echo-puck-main')+'\n'+
+      'Last command: '+(a.lastCommand||'-')+'\n'+
+      'Last reply: '+(a.lastReply||'-')+'\n'+
+      'Last error: '+(a.lastError||'-');
+
     const m=JSON.stringify(s.microphones||[]);
     if(m!==lastMics){
       lastMics=m;
@@ -1860,6 +1928,13 @@ async function refresh(){
 }
 setInterval(refresh,1500);
 refresh();
+
+async function setAssistant(enabled){
+  try{
+    await api('/api/assistant/enabled?value='+enabled,{method:'POST'});
+    await refresh();
+  }catch(e){ alert(e.message); }
+}
 
 async function startAnnouncementRecording(){
   try{
