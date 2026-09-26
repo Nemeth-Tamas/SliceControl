@@ -316,6 +316,21 @@ internal static class RadioController
                 return true;
             }
 
+            VlcPlaybackState stateBefore =
+                await RecoverTransportIfNeededAsync(
+                    cancellationToken);
+
+            // A stopped/restarted VLC may not have a Core Audio session until
+            // playback has actually resumed. Give Windows a moment to publish it.
+            if (stateBefore is
+                VlcPlaybackState.Stopped or
+                VlcPlaybackState.Unknown)
+            {
+                await Task.Delay(
+                    350,
+                    cancellationToken);
+            }
+
             bool unmuted =
                 await SetRadioSessionMutedAsync(
                     muted: false,
@@ -325,18 +340,20 @@ internal static class RadioController
             {
                 DiagnosticLog.Warning(
                     "radio",
-                    "unmute_failed",
+                    "unmute_deferred_no_session",
                     new
                     {
                         released_reason =
-                            reason
+                            reason,
+                        transport_state_before =
+                            stateBefore.ToString()
                     });
 
-                return false;
+                // No VLC Core Audio session means there is currently nothing
+                // audible to unmute. The radio watchdog/playback path will
+                // create a fresh unmuted session on its next healthy start.
+                return true;
             }
-
-            await RecoverTransportIfNeededAsync(
-                cancellationToken);
 
             Console.WriteLine(
                 "RADIO -> unmuted");
@@ -362,8 +379,11 @@ internal static class RadioController
         bool muted,
         CancellationToken cancellationToken)
     {
+        const int maxAttempts =
+            12;
+
         for (int attempt = 0;
-             attempt < 6;
+             attempt < maxAttempts;
              attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -440,10 +460,10 @@ internal static class RadioController
                 return true;
             }
 
-            if (attempt < 5)
+            if (attempt < maxAttempts - 1)
             {
                 await Task.Delay(
-                    150,
+                    250,
                     cancellationToken);
             }
         }
@@ -487,24 +507,37 @@ internal static class RadioController
         }
     }
 
-    private static async Task RecoverTransportIfNeededAsync(
+    private static async Task<VlcPlaybackState> RecoverTransportIfNeededAsync(
         CancellationToken cancellationToken)
     {
         VlcPlaybackState state =
             await QueryStateAsync(
                 cancellationToken);
 
+        DiagnosticLog.Event(
+            "radio",
+            "transport_checked",
+            new
+            {
+                state =
+                    state.ToString()
+            });
+
         switch (state)
         {
             case VlcPlaybackState.Playing:
-                return;
+                return state;
 
             case VlcPlaybackState.Paused:
                 await SendCommandAsync(
                     "pause",
                     cancellationToken);
 
-                return;
+                DiagnosticLog.Event(
+                    "radio",
+                    "transport_resumed_from_pause");
+
+                return state;
 
             case VlcPlaybackState.Stopped:
             case VlcPlaybackState.Unknown:
@@ -512,7 +545,19 @@ internal static class RadioController
                     "play",
                     cancellationToken);
 
-                return;
+                DiagnosticLog.Event(
+                    "radio",
+                    "transport_play_requested",
+                    new
+                    {
+                        previous_state =
+                            state.ToString()
+                    });
+
+                return state;
+
+            default:
+                return state;
         }
     }
 
