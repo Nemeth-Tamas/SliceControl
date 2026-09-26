@@ -14,6 +14,17 @@ internal static class RadioPresetStore
             "SliceAppliance",
             "radio-presets.json");
 
+    private static readonly Dictionary<string, string> DisplayNames =
+        new(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            ["retro"] = "Retro Rádió",
+            ["retro-backup"] = "Retro Rádió (backup)",
+            ["radio1"] = "Rádió 1",
+            ["juventus"] = "Juventus Rádió",
+            ["jazzy"] = "Jazzy Rádió 90.9"
+        };
+
     private static readonly Dictionary<string, string> Defaults =
         new(
             StringComparer.OrdinalIgnoreCase)
@@ -46,6 +57,16 @@ internal static class RadioPresetStore
                         pair.Value,
                     StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    public static string? GetDisplayName(
+        string preset)
+    {
+        return DisplayNames.TryGetValue(
+            preset,
+            out string? value)
+                ? value
+                : null;
     }
 
     public static string Resolve(
