@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using NAudio.CoreAudioApi;
 
 namespace SliceTranscribe;
@@ -7,9 +6,6 @@ internal sealed class AudioActivityMonitor
 {
     private const string PhoneRadioPauseReason =
         "phone-media";
-
-    private const string SonoBusRadioPauseReason =
-        "sonobus";
 
     private const float ActivityThreshold =
         0.003f;
@@ -43,13 +39,7 @@ internal sealed class AudioActivityMonitor
         DateTimeOffset? lastPhoneAudio =
             null;
 
-        DateTimeOffset? lastSonoBusAudio =
-            null;
-
         bool holdingPhoneRadio =
-            false;
-
-        bool holdingSonoBusRadio =
             false;
 
         bool startupAudioRecovered =
@@ -77,18 +67,12 @@ internal sealed class AudioActivityMonitor
                         out string? source,
                         out float peak);
 
-                bool sonoBusActive =
-                    TryFindSonoBusAudio(
-                        manager.Sessions,
-                        out float sonoBusPeak);
-
                 if (!startupAudioRecovered)
                 {
                     startupAudioRecovered =
                         true;
 
-                    if (!phoneActive &&
-                        !sonoBusActive)
+                    if (!phoneActive)
                     {
                         await RadioController.ReleasePauseAsync(
                             "startup-recovery",
@@ -156,60 +140,6 @@ internal sealed class AudioActivityMonitor
                         });
                 }
 
-                if (sonoBusActive)
-                {
-                    lastSonoBusAudio =
-                        now;
-
-                    if (!holdingSonoBusRadio)
-                    {
-                        holdingSonoBusRadio =
-                            await RadioController.RequestPauseAsync(
-                                SonoBusRadioPauseReason,
-                                cancellationToken);
-
-                        if (holdingSonoBusRadio)
-                        {
-                            Console.WriteLine(
-                                $"SONOBUS AUDIO ACTIVE -> {sonoBusPeak:P1}");
-
-                            DiagnosticLog.Event(
-                                "audio_activity",
-                                "sonobus_active",
-                                new
-                                {
-                                    peak =
-                                        sonoBusPeak
-                                });
-                        }
-                    }
-                }
-                else if (
-                    holdingSonoBusRadio &&
-                    lastSonoBusAudio is not null &&
-                    now - lastSonoBusAudio.Value >=
-                        _resumeDelay)
-                {
-                    await RadioController.ReleasePauseAsync(
-                        SonoBusRadioPauseReason,
-                        cancellationToken);
-
-                    holdingSonoBusRadio =
-                        false;
-
-                    lastSonoBusAudio =
-                        null;
-
-                    DiagnosticLog.Event(
-                        "audio_activity",
-                        "sonobus_quiet",
-                        new
-                        {
-                            resume_delay_ms =
-                                (long)_resumeDelay.TotalMilliseconds
-                        });
-                }
-
                 await Task.Delay(
                     _pollInterval,
                     cancellationToken);
@@ -234,84 +164,7 @@ internal sealed class AudioActivityMonitor
                 }
             }
 
-            if (holdingSonoBusRadio)
-            {
-                try
-                {
-                    await RadioController.ReleasePauseAsync(
-                        SonoBusRadioPauseReason,
-                        CancellationToken.None);
-                }
-                catch
-                {
-                }
-            }
         }
-    }
-
-    private static bool TryFindSonoBusAudio(
-        SessionCollection sessions,
-        out float peak)
-    {
-        peak =
-            0;
-
-        for (int i = 0;
-             i < sessions.Count;
-             i++)
-        {
-            try
-            {
-                using AudioSessionControl session =
-                    sessions[i];
-
-                uint processId =
-                    session.GetProcessID;
-
-                if (processId == 0)
-                {
-                    continue;
-                }
-
-                using Process process =
-                    Process.GetProcessById(
-                        checked(
-                            (int)processId));
-
-                if (!process.ProcessName.Equals(
-                    "SonoBus",
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (session.SimpleAudioVolume.Mute)
-                {
-                    continue;
-                }
-
-                float sessionPeak =
-                    session.AudioMeterInformation.MasterPeakValue;
-
-                if (sessionPeak <
-                    ActivityThreshold)
-                {
-                    continue;
-                }
-
-                peak =
-                    Math.Max(
-                        peak,
-                        sessionPeak);
-            }
-            catch
-            {
-                // Sessions/processes can disappear while enumerating them.
-            }
-        }
-
-        return peak >=
-            ActivityThreshold;
     }
 
     private static bool TryFindPhoneA2dpAudio(
