@@ -310,10 +310,18 @@ try
     var audioActivity =
         new AudioActivityMonitor();
 
+    await using var assistant =
+        new AssistantMode(
+            slice,
+            recording,
+            requestedMic,
+            remoteUrl);
+
     await using var remoteControl =
         new RemoteControlServer(
             slice,
-            recording);
+            recording,
+            assistant);
 
     Console.CancelKeyPress +=
         (_, eventArgs) =>
@@ -346,6 +354,9 @@ try
     Task? remoteControlTask =
         null;
 
+    Task? assistantTask =
+        null;
+
     try
     {
         if (restoreHpService)
@@ -370,6 +381,10 @@ try
             remoteControl.RunAsync(
                 cts.Token);
 
+        assistantTask =
+            assistant.RunAsync(
+                cts.Token);
+
         Console.WriteLine(
             "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
 
@@ -380,6 +395,11 @@ try
 
         Console.WriteLine(
             $"Remote control: http://{RemoteControlServer.WireGuardAddress}:{remoteControl.Port}/");
+
+        Console.WriteLine(
+            assistant.Enabled
+                ? "Assistant: ECHO wake word enabled"
+                : "Assistant: disabled until Hermes is configured");
 
         Console.WriteLine(
             $"Microphone: {recorder.DeviceName}");
@@ -519,6 +539,22 @@ try
             {
                 Console.Error.WriteLine(
                     $"Audio activity monitor stopped with an error: {ex.Message}");
+            }
+        }
+
+        if (assistantTask is not null)
+        {
+            try
+            {
+                await assistantTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Assistant mode stopped with an error: {ex.Message}");
             }
         }
 
