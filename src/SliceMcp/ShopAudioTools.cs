@@ -166,4 +166,26 @@ public sealed class ShopAudioTools
         return _api.PostAsync(
             "/api/record/stop");
     }
+
+    [McpServerTool]
+    [Description(
+        "Returns the ECHO puck assistant state, Hermes configuration/session state, and the last voice command, reply, or error.")]
+    public Task<JsonElement> assistant_status()
+    {
+        return _api.GetAsync(
+            "/api/assistant/status");
+    }
+
+    [McpServerTool]
+    [Description(
+        "Enables or disables local ECHO wake-word listening on the Slice.")]
+    public Task<JsonElement> assistant_set_enabled(
+        [Description(
+            "True enables wake-word listening; false disables it.")]
+        bool enabled)
+    {
+        return _api.PostAsync(
+            $"/api/assistant/enabled?value={enabled.ToString().ToLowerInvariant()}");
+    }
+
 }
