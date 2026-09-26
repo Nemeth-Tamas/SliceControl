@@ -118,6 +118,15 @@ internal sealed class AudioActivityMonitor
                         {
                             Console.WriteLine(
                                 $"PHONE MEDIA ACTIVE -> {source} ({peak:P1})");
+
+                            DiagnosticLog.Event(
+                                "audio_activity",
+                                "phone_media_active",
+                                new
+                                {
+                                    source,
+                                    peak
+                                });
                         }
                     }
                 }
@@ -136,6 +145,15 @@ internal sealed class AudioActivityMonitor
 
                     lastPhoneAudio =
                         null;
+
+                    DiagnosticLog.Event(
+                        "audio_activity",
+                        "phone_media_quiet",
+                        new
+                        {
+                            resume_delay_ms =
+                                (long)_resumeDelay.TotalMilliseconds
+                        });
                 }
 
                 if (sonoBusActive)
@@ -154,6 +172,15 @@ internal sealed class AudioActivityMonitor
                         {
                             Console.WriteLine(
                                 $"SONOBUS AUDIO ACTIVE -> {sonoBusPeak:P1}");
+
+                            DiagnosticLog.Event(
+                                "audio_activity",
+                                "sonobus_active",
+                                new
+                                {
+                                    peak =
+                                        sonoBusPeak
+                                });
                         }
                     }
                 }
@@ -172,6 +199,15 @@ internal sealed class AudioActivityMonitor
 
                     lastSonoBusAudio =
                         null;
+
+                    DiagnosticLog.Event(
+                        "audio_activity",
+                        "sonobus_quiet",
+                        new
+                        {
+                            resume_delay_ms =
+                                (long)_resumeDelay.TotalMilliseconds
+                        });
                 }
 
                 await Task.Delay(
