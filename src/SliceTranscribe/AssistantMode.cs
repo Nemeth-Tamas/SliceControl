@@ -70,6 +70,7 @@ internal sealed class AssistantMode :
     private bool _speaking;
     private bool _probeBusy;
     private bool _listenDuckHeld;
+    private bool _commandSpeechDetected;
 
     private DateTimeOffset _nextProbe =
         DateTimeOffset.MinValue;
@@ -164,6 +165,9 @@ internal sealed class AssistantMode :
                     false;
 
                 _processing =
+                    false;
+
+                _commandSpeechDetected =
                     false;
             }
         }
@@ -302,6 +306,9 @@ internal sealed class AssistantMode :
                 if (peak >=
                     SpeechPeakThreshold)
                 {
+                    _commandSpeechDetected =
+                        true;
+
                     _lastSpeech =
                         now;
                 }
@@ -311,6 +318,7 @@ internal sealed class AssistantMode :
                     _listeningStarted;
 
                 bool silenceFinished =
+                    _commandSpeechDetected &&
                     listenAge >=
                         MinimumListenDuration &&
                     now -
@@ -441,6 +449,11 @@ internal sealed class AssistantMode :
 
                     _listeningStarted =
                         DateTimeOffset.UtcNow;
+
+                    _commandSpeechDetected =
+                        !string.IsNullOrWhiteSpace(
+                            StripWakeWord(
+                                text));
 
                     _lastSpeech =
                         _listeningStarted;
