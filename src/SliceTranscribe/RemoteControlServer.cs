@@ -1897,6 +1897,12 @@ async function refresh(){
     const configured=a.HermesConfigured??a.hermesConfigured??false;
     const sessionId=a.HermesSessionId??a.hermesSessionId??null;
     const sessionKey=a.HermesSessionKey??a.hermesSessionKey??'echo-puck-main';
+    const wakeEngine=a.WakeEngine??a.wakeEngine??'-';
+    const commandEngine=a.CommandEngine??a.commandEngine??'-';
+    const wakeMs=a.LastWakeLatencyMs??a.lastWakeLatencyMs??null;
+    const remoteMs=a.LastRemoteCommandLatencyMs??a.lastRemoteCommandLatencyMs??null;
+    const localMs=a.LastLocalCommandLatencyMs??a.lastLocalCommandLatencyMs??null;
+    const localText=a.LastLocalCommandTranscript??a.lastLocalCommandTranscript??'-';
     const lastCommand=a.LastCommand??a.lastCommand??'-';
     const lastReply=a.LastReply??a.lastReply??'-';
     const lastError=a.LastError??a.lastError??'-';
@@ -1904,6 +1910,10 @@ async function refresh(){
       'State: '+state+'\n'+
       'Hermes: '+(configured?'configured':'NOT CONFIGURED')+'\n'+
       'Session: '+(sessionId||sessionKey)+'\n'+
+      'Wake: '+wakeEngine+(wakeMs!==null?' ('+wakeMs+' ms)':'')+'\n'+
+      'Command: '+commandEngine+'\n'+
+      'Last STT: remote '+(remoteMs??'-')+' ms / local '+(localMs??'-')+' ms\n'+
+      'Local shadow: '+localText+'\n'+
       'Last command: '+lastCommand+'\n'+
       'Last reply: '+lastReply+'\n'+
       'Last error: '+lastError;
