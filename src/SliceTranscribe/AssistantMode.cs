@@ -46,6 +46,10 @@ internal sealed class AssistantMode :
         TimeSpan.FromSeconds(
             30);
 
+    private static readonly TimeSpan CaptureStallTimeout =
+        TimeSpan.FromSeconds(
+            4);
+
     private const float SpeechPeakThreshold =
         0.018f;
 
@@ -89,6 +93,9 @@ internal sealed class AssistantMode :
     private DateTimeOffset _listeningStarted;
     private DateTimeOffset _lastSpeech;
     private DateTimeOffset _lastIdleSpeech =
+        DateTimeOffset.MinValue;
+
+    private DateTimeOffset _lastCaptureData =
         DateTimeOffset.MinValue;
 
     private long? _lastWakeLatencyMs;
@@ -306,21 +313,73 @@ internal sealed class AssistantMode :
 
                 capture.StartRecording();
 
+                _lastCaptureData =
+                    DateTimeOffset.UtcNow;
+
                 Console.WriteLine(
                     restartCount == 0
                         ? $"ASSISTANT -> ECHO wake mode on {microphone.FriendlyName}"
                         : $"ASSISTANT MIC -> recovered on {microphone.FriendlyName} (restart {restartCount})");
 
                 Exception? stopError =
-                    await stopped.Task.WaitAsync(
-                        cancellationToken);
+                    null;
+
+                bool stalled =
+                    false;
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    Task delay =
+                        Task.Delay(
+                            TimeSpan.FromSeconds(
+                                1),
+                            cancellationToken);
+
+                    Task completed =
+                        await Task.WhenAny(
+                            stopped.Task,
+                            delay);
+
+                    if (completed ==
+                        stopped.Task)
+                    {
+                        stopError =
+                            await stopped.Task;
+
+                        break;
+                    }
+
+                    DateTimeOffset lastData =
+                        _lastCaptureData;
+
+                    if (
+                        lastData !=
+                            DateTimeOffset.MinValue &&
+                        DateTimeOffset.UtcNow -
+                            lastData >=
+                            CaptureStallTimeout)
+                    {
+                        stalled =
+                            true;
+
+                        break;
+                    }
+                }
 
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    Console.Error.WriteLine(
-                        stopError is null
-                            ? "ASSISTANT MIC -> capture stopped unexpectedly; reopening in 1 s"
-                            : $"ASSISTANT MIC -> capture failed: {stopError.GetType().Name}: {stopError.Message}; reopening in 1 s");
+                    if (stalled)
+                    {
+                        Console.Error.WriteLine(
+                            $"ASSISTANT MIC -> capture stalled for {CaptureStallTimeout.TotalSeconds:0} s; reopening in 1 s");
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine(
+                            stopError is null
+                                ? "ASSISTANT MIC -> capture stopped unexpectedly; reopening in 1 s"
+                                : $"ASSISTANT MIC -> capture failed: {stopError.GetType().Name}: {stopError.Message}; reopening in 1 s");
+                    }
 
                     ResetCaptureState();
 
@@ -438,6 +497,9 @@ internal sealed class AssistantMode :
 
             _nextProbe =
                 DateTimeOffset.MinValue;
+
+            _lastCaptureData =
+                DateTimeOffset.MinValue;
         }
     }
 
@@ -445,6 +507,9 @@ internal sealed class AssistantMode :
         object? sender,
         WaveInEventArgs e)
     {
+        _lastCaptureData =
+            DateTimeOffset.UtcNow;
+
         WaveFormat? format =
             _captureFormat;
 
