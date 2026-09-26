@@ -102,6 +102,9 @@ internal sealed class AssistantMode :
         _whisper =
             new WhisperOneShotClient(
                 whisperUrl);
+
+        _enabled =
+            _hermes.IsConfigured;
     }
 
     public bool Enabled
