@@ -203,6 +203,16 @@ if (-not $NoStart) {
     Write-Host ("  Announcements: {0}" -f $announcementPath)
     Write-Host ("  Logs: {0}" -f (Join-Path $env:LOCALAPPDATA "SliceAppliance\Logs"))
 
+    $assistantConfig = Join-Path $env:LOCALAPPDATA "SliceAppliance\assistant.json"
+
+    if (Test-Path $assistantConfig) {
+        Write-Host ("  ECHO assistant: configured ({0})" -f $assistantConfig)
+    }
+    else {
+        Write-Warning "ECHO assistant is not configured yet."
+        Write-Host "  Run tools\SliceAppliance\Configure-SliceAssistant.ps1 -BaseUrl <Hermes URL> -ApiKey <key>"
+    }
+
     if ($null -eq (Get-NetIPAddress -IPAddress $WireGuardAddress -ErrorAction SilentlyContinue)) {
         Write-Warning "WireGuard address $WireGuardAddress is not present yet. Slice MCP will wait for it for up to two minutes each start."
         Write-Warning "Run tools\SliceAppliance\Setup-SliceWireGuard.ps1 after installing WireGuard for Windows."
