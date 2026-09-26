@@ -134,7 +134,7 @@ internal sealed class LocalEnglishWhisperClient :
                 new StringBuilder();
 
             await foreach (
-                SegmentData segment
+                var segment
                 in processor.ProcessAsync(
                     wavStream,
                     cancellationToken))
