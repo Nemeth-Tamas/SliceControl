@@ -19,6 +19,10 @@ internal static class RadioController
         new(
             StringComparer.OrdinalIgnoreCase);
 
+    private static string? _currentPreset;
+    private static string? _currentStation;
+    private static string? _currentUrl;
+
     private enum VlcPlaybackState
     {
         Unknown = 0,
@@ -32,6 +36,15 @@ internal static class RadioController
         return RadioPresetStore.List();
     }
 
+    public static string? CurrentPreset =>
+        _currentPreset;
+
+    public static string? CurrentStation =>
+        _currentStation;
+
+    public static string? CurrentUrl =>
+        _currentUrl;
+
     public static async Task<string> PlayAsync(
         string presetOrUrl,
         CancellationToken cancellationToken = default)
@@ -39,6 +52,18 @@ internal static class RadioController
         string url =
             RadioPresetStore.Resolve(
                 presetOrUrl);
+
+        string? preset =
+            RadioPresetStore.List().ContainsKey(
+                presetOrUrl)
+                ? presetOrUrl
+                : null;
+
+        string? station =
+            preset is null
+                ? null
+                : RadioPresetStore.GetDisplayName(
+                    preset);
 
         await Gate.WaitAsync(
             cancellationToken);
@@ -77,8 +102,18 @@ internal static class RadioController
                     cancellationToken);
             }
 
+            _currentPreset =
+                preset;
+
+            _currentStation =
+                station ??
+                presetOrUrl;
+
+            _currentUrl =
+                url;
+
             Console.WriteLine(
-                $"RADIO -> playing {presetOrUrl}");
+                $"RADIO -> playing {_currentStation}");
 
             return url;
         }
