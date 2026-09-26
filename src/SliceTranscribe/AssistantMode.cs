@@ -40,11 +40,11 @@ internal sealed class AssistantMode :
 
     private static readonly TimeSpan SilenceDuration =
         TimeSpan.FromSeconds(
-            1.2);
+            2.0);
 
     private static readonly TimeSpan MaximumListenDuration =
         TimeSpan.FromSeconds(
-            15);
+            30);
 
     private const float SpeechPeakThreshold =
         0.018f;
@@ -56,8 +56,10 @@ internal sealed class AssistantMode :
     private readonly RecordingCoordinator _recording;
     private readonly string? _microphoneName;
     private readonly WhisperOneShotClient _remoteWhisper;
-    private readonly LocalEnglishWhisperClient _localWhisper =
-        new();
+    private readonly LocalEnglishWhisperClient _wakeWhisper =
+        LocalEnglishWhisperClient.CreateTinyEn();
+    private readonly LocalEnglishWhisperClient _shadowWhisper =
+        LocalEnglishWhisperClient.CreateBaseEn();
     private readonly HermesAssistantClient _hermes =
         new();
 
@@ -152,7 +154,7 @@ internal sealed class AssistantMode :
                 WakeEngine:
                     "local tiny.en CPU (remote fallback)",
                 CommandEngine:
-                    "remote large-v3 + local tiny.en shadow",
+                    "remote large-v3 + local base.en shadow",
                 LastWakeLatencyMs:
                     _lastWakeLatencyMs,
                 LastWakeTranscript:
@@ -240,7 +242,7 @@ internal sealed class AssistantMode :
             "ASSISTANT -> wake detection uses local Whisper tiny.en on the Slice CPU (3090 only as fallback)");
 
         Console.WriteLine(
-            "ASSISTANT -> commands use remote large-v3; local tiny.en runs in shadow mode for speed/accuracy comparison");
+            "ASSISTANT -> commands use remote large-v3; local base.en runs in shadow mode for speed/accuracy comparison");
 
         Console.WriteLine(
             _hermes.IsConfigured
@@ -263,7 +265,14 @@ internal sealed class AssistantMode :
                 _ =
                     Task.Run(
                         () =>
-                            _localWhisper.WarmUpAsync(
+                            _wakeWhisper.WarmUpAsync(
+                                cancellationToken),
+                        CancellationToken.None);
+
+                _ =
+                    Task.Run(
+                        () =>
+                            _shadowWhisper.WarmUpAsync(
                                 cancellationToken),
                         CancellationToken.None);
             }
@@ -476,7 +485,7 @@ internal sealed class AssistantMode :
             try
             {
                 LocalWhisperResult local =
-                    await _localWhisper.TranscribeAsync(
+                    await _wakeWhisper.TranscribeAsync(
                         audio,
                         format,
                         prompt:
@@ -618,7 +627,7 @@ internal sealed class AssistantMode :
         try
         {
             Task<LocalWhisperResult> localShadow =
-                _localWhisper.TranscribeAsync(
+                _shadowWhisper.TranscribeAsync(
                     audio,
                     format,
                     prompt:
@@ -815,7 +824,7 @@ internal sealed class AssistantMode :
             }
 
             Console.WriteLine(
-                $"LOCAL tiny.en SHADOW -> {local.ElapsedMilliseconds} ms -> {local.Text}");
+                $"LOCAL base.en SHADOW -> {local.ElapsedMilliseconds} ms -> {local.Text}");
         }
         catch (OperationCanceledException)
         {
@@ -823,7 +832,7 @@ internal sealed class AssistantMode :
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"LOCAL tiny.en SHADOW -> failed: {ex.Message}");
+                $"LOCAL base.en SHADOW -> failed: {ex.Message}");
         }
     }
 
@@ -1307,7 +1316,8 @@ internal sealed class AssistantMode :
         _rolling.Dispose();
         _command.Dispose();
         _remoteWhisper.Dispose();
-        await _localWhisper.DisposeAsync();
+        await _wakeWhisper.DisposeAsync();
+        await _shadowWhisper.DisposeAsync();
         _hermes.Dispose();
     }
 }
