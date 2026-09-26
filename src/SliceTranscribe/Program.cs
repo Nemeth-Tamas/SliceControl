@@ -589,7 +589,7 @@ try
 catch (Exception ex)
 {
     Console.Error.WriteLine(
-        $"{ex.GetType().Name}: {ex.Message}");
+        ex.ToString());
 
     return 1;
 }
@@ -634,7 +634,7 @@ static async Task PumpButtonsAsync(
                 restartCount++;
 
                 Console.Error.WriteLine(
-                    $"BUTTON MONITOR -> error: {ex.GetType().Name}: {ex.Message}");
+                    $"BUTTON MONITOR -> error: {ex}");
 
                 Console.Error.WriteLine(
                     $"BUTTON MONITOR -> restarting in 1 s (attempt {restartCount})");
