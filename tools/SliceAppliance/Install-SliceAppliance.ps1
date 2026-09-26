@@ -115,17 +115,23 @@ $mcpArgs = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}" -
 $transcribeAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $transcribeArgs -WorkingDirectory $PSScriptRoot
 $radioAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $radioArgs -WorkingDirectory $PSScriptRoot
 $mcpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $mcpArgs -WorkingDirectory $PSScriptRoot
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$trigger.Delay = "PT5S"
+$radioTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$radioTrigger.Delay = "PT3S"
+
+$mcpTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$mcpTrigger.Delay = "PT5S"
+
+$transcribeTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$transcribeTrigger.Delay = "PT7S"
 
 $transcribeSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $radioSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $mcpSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
 
-Register-ScheduledTask -TaskName "SliceTranscribe" -Action $transcribeAction -Trigger $trigger -Settings $transcribeSettings -Principal $principal -Description "Auto-start SliceTranscribe and restart it after failures." -Force | Out-Null
-Register-ScheduledTask -TaskName "Slice Retro Radio" -Action $radioAction -Trigger $trigger -Settings $radioSettings -Principal $principal -Description "Play online shop radio directly in VLC." -Force | Out-Null
-Register-ScheduledTask -TaskName "Slice MCP" -Action $mcpAction -Trigger $trigger -Settings $mcpSettings -Principal $principal -Description "Expose Slice shop controls over MCP on the WireGuard interface only." -Force | Out-Null
+Register-ScheduledTask -TaskName "SliceTranscribe" -Action $transcribeAction -Trigger $transcribeTrigger -Settings $transcribeSettings -Principal $principal -Description "Auto-start SliceTranscribe and restart it after failures." -Force | Out-Null
+Register-ScheduledTask -TaskName "Slice Retro Radio" -Action $radioAction -Trigger $radioTrigger -Settings $radioSettings -Principal $principal -Description "Play online shop radio directly in VLC." -Force | Out-Null
+Register-ScheduledTask -TaskName "Slice MCP" -Action $mcpAction -Trigger $mcpTrigger -Settings $mcpSettings -Principal $principal -Description "Expose Slice shop controls over MCP on the WireGuard interface only." -Force | Out-Null
 
 Write-Host
 Write-Host "Installed scheduled tasks:"
@@ -229,5 +235,5 @@ if (-not $NoStart) {
 }
 
 Write-Host
-Write-Host "All three tasks will start automatically 5 seconds after each sign-in."
+Write-Host "Startup order: Retro Radio at +3 s, Slice MCP at +5 s, SliceTranscribe at +7 s after sign-in."
 Write-Host "Use -NoStart if you only want to install/update the tasks without starting them immediately."
