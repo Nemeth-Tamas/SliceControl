@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$exe = Join-Path $repoRoot "src\SliceMcp\bin\Release\net8.0-windows10.0.19041.0\SliceMcp.exe"
+$exe = Join-Path $repoRoot "src\SliceMcp\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\SliceMcp.exe"
 
 if (-not (Test-Path $exe)) {
     throw "Slice MCP executable was not found at $exe"
