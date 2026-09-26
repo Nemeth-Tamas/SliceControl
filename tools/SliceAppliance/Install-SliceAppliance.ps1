@@ -82,15 +82,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "SliceTranscribe Release build failed."
 }
 
-Write-Host "Building SliceMcp Release..."
-dotnet build $mcpProject -c Release
+Write-Host "Publishing SliceMcp self-contained Release..."
+dotnet publish $mcpProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false
 
 if ($LASTEXITCODE -ne 0) {
-    throw "SliceMcp Release build failed."
+    throw "SliceMcp self-contained publish failed."
 }
 
 $transcribeExe = Join-Path $repoRoot "src\SliceTranscribe\bin\Release\net8.0-windows10.0.19041.0\SliceTranscribe.exe"
-$mcpExe = Join-Path $repoRoot "src\SliceMcp\bin\Release\net8.0-windows10.0.19041.0\SliceMcp.exe"
+$mcpExe = Join-Path $repoRoot "src\SliceMcp\bin\Release\net8.0-windows10.0.19041.0\win-x64\publish\SliceMcp.exe"
 
 $radioScript = Join-Path $PSScriptRoot "Start-RetroRadio.ps1"
 $transcribeScript = Join-Path $PSScriptRoot "Start-SliceTranscribe.ps1"
