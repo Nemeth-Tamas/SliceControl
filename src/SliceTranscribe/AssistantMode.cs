@@ -560,7 +560,7 @@ internal sealed class AssistantMode :
                 await BeginListeningDuckAsync(
                     cancellationToken);
 
-                _slice.Lights.ShowActiveCall();
+                TryShowActiveCall();
             }
         }
         catch (OperationCanceledException)
@@ -831,7 +831,7 @@ internal sealed class AssistantMode :
                     $"TTS -> volume already {originalVolume}%; no boost available");
             }
 
-            _slice.Lights.ShowActiveCall();
+            TryShowActiveCall();
 
             await NeuralTtsSpeaker.SpeakAsync(
                 text,
@@ -979,6 +979,19 @@ internal sealed class AssistantMode :
             take);
     }
 
+    private void TryShowActiveCall()
+    {
+        try
+        {
+            _slice.Lights.ShowActiveCall();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"ASSISTANT LIGHTS -> unavailable: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private void RefreshLights()
     {
         try
@@ -990,7 +1003,7 @@ internal sealed class AssistantMode :
                     _processing ||
                     _speaking)
                 {
-                    _slice.Lights.ShowActiveCall();
+                    TryShowActiveCall();
                     return;
                 }
             }
@@ -1003,7 +1016,7 @@ internal sealed class AssistantMode :
                 }
                 else
                 {
-                    _slice.Lights.ShowActiveCall();
+                    TryShowActiveCall();
                 }
             }
             else
