@@ -63,14 +63,14 @@ $config = Get-Content -Raw -Path $configPath | ConvertFrom-Json
 
 if (-not $config.Group) {
     Write-SonoBusLog "SonoBus config is missing Group."
-    exit 1
+    exit 0
 }
 
 $sonoBus = Find-SonoBus
 
 if (-not $sonoBus) {
-    Write-SonoBusLog "SonoBus.exe was not found."
-    exit 1
+    Write-SonoBusLog "SonoBus.exe was not found; task will remain idle."
+    exit 0
 }
 
 Get-Process -Name "SonoBus" -ErrorAction SilentlyContinue |
