@@ -53,6 +53,26 @@ internal sealed class AssistantMode :
         TimeSpan.FromSeconds(
             30);
 
+    private static readonly TimeSpan WakeOnlyListenTimeout =
+        TimeSpan.FromSeconds(
+            6);
+
+    private static readonly TimeSpan RemoteCommandTimeout =
+        TimeSpan.FromSeconds(
+            6);
+
+    private static readonly TimeSpan HermesRequestTimeout =
+        TimeSpan.FromSeconds(
+            45);
+
+    private static readonly TimeSpan TtsRequestTimeout =
+        TimeSpan.FromSeconds(
+            25);
+
+    private static readonly TimeSpan InteractionWatchdogTimeout =
+        TimeSpan.FromSeconds(
+            60);
+
     private static readonly TimeSpan CaptureStallTimeout =
         TimeSpan.FromSeconds(
             4);
@@ -121,6 +141,8 @@ internal sealed class AssistantMode :
 
     private CancellationToken _runCancellationToken;
 
+    private CancellationTokenSource? _interactionCancellation;
+
     public AssistantMode(
         SliceDevice slice,
         RecordingCoordinator recording,
@@ -153,6 +175,29 @@ internal sealed class AssistantMode :
                 return _enabled;
             }
         }
+    }
+
+    public bool IsBusy
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return
+                    _listening ||
+                    _processing ||
+                    _speaking;
+            }
+        }
+    }
+
+    public Task<bool> CancelCurrentInteractionAsync(
+        string reason = "manual")
+    {
+        return CancelCurrentInteractionCoreAsync(
+            reason,
+            workerExpected:
+                null);
     }
 
     public AssistantStatus GetStatus()
@@ -717,6 +762,9 @@ internal sealed class AssistantMode :
         string? commandFinishReason =
             null;
 
+        bool wakeOnlyTimedOut =
+            false;
+
         long commandListenAgeMs =
             0;
 
@@ -773,7 +821,28 @@ internal sealed class AssistantMode :
                     listenAge >=
                         MaximumListenDuration;
 
-                if (
+                bool wakeOnlyExpired =
+                    !_commandSpeechDetected &&
+                    listenAge >=
+                        WakeOnlyListenTimeout;
+
+                if (wakeOnlyExpired)
+                {
+                    wakeOnlyTimedOut =
+                        true;
+
+                    _command.SetLength(
+                        0);
+
+                    _listening =
+                        false;
+
+                    // Blocks another wake probe until the async cleanup below
+                    // has released radio/phone ducking and reset the lights.
+                    _processing =
+                        true;
+                }
+                else if (
                     silenceFinished ||
                     timedOut)
                 {
@@ -858,6 +927,25 @@ internal sealed class AssistantMode :
                     _runCancellationToken);
         }
 
+        if (wakeOnlyTimedOut)
+        {
+            DiagnosticLog.Event(
+                "assistant",
+                "wake_only_timeout",
+                new
+                {
+                    timeout_ms =
+                        (long)
+                            WakeOnlyListenTimeout.TotalMilliseconds
+                });
+
+            _ =
+                CancelCurrentInteractionCoreAsync(
+                    "wake-only-timeout",
+                    workerExpected:
+                        false);
+        }
+
         if (commandSnapshot is not null)
         {
             DiagnosticLog.Event(
@@ -882,10 +970,19 @@ internal sealed class AssistantMode :
                             ref _captureCallbackCount)
                 });
 
+            CancellationTokenSource? interaction;
+
+            lock (_gate)
+            {
+                interaction =
+                    _interactionCancellation;
+            }
+
             _ =
                 ProcessCommandAsync(
                     commandSnapshot,
                     format,
+                    interaction,
                     _runCancellationToken);
         }
     }
@@ -963,6 +1060,12 @@ internal sealed class AssistantMode :
                     _lastSpeech =
                         _listeningStarted;
 
+                    _interactionCancellation?.Dispose();
+
+                    _interactionCancellation =
+                        CancellationTokenSource.CreateLinkedTokenSource(
+                            _runCancellationToken);
+
                     startListening =
                         true;
                 }
@@ -995,7 +1098,23 @@ internal sealed class AssistantMode :
                                     _lastCaptureData).TotalMilliseconds
                     });
 
+                CancellationTokenSource? interaction;
+
+                lock (_gate)
+                {
+                    interaction =
+                        _interactionCancellation;
+                }
+
+                if (interaction is not null)
+                {
+                    _ =
+                        WatchInteractionTimeoutAsync(
+                            interaction);
+                }
+
                 await BeginListeningDuckAsync(
+                    interaction?.Token ??
                     cancellationToken);
 
                 TryShowActiveCall();
@@ -1039,8 +1158,13 @@ internal sealed class AssistantMode :
     private async Task ProcessCommandAsync(
         byte[] audio,
         WaveFormat format,
-        CancellationToken cancellationToken)
+        CancellationTokenSource? interactionCancellation,
+        CancellationToken fallbackCancellationToken)
     {
+        CancellationToken cancellationToken =
+            interactionCancellation?.Token ??
+            fallbackCancellationToken;
+
         try
         {
             string transcript;
@@ -1061,6 +1185,13 @@ internal sealed class AssistantMode :
 
             try
             {
+                using var remoteTimeout =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        cancellationToken);
+
+                remoteTimeout.CancelAfter(
+                    RemoteCommandTimeout);
+
                 transcript =
                     await _remoteWhisper.TranscribeAsync(
                         audio,
@@ -1069,7 +1200,7 @@ internal sealed class AssistantMode :
                             "en",
                         prompt:
                             "Echo. Calendar. Schedule. Client. Appointment. Reminder. Email. Radio. Cellnet.",
-                        cancellationToken);
+                        remoteTimeout.Token);
 
                 remoteWatch.Stop();
 
@@ -1183,17 +1314,10 @@ internal sealed class AssistantMode :
                 Console.WriteLine(
                     "ASSISTANT -> wake heard, but no command was understood");
 
-                await EndListeningDuckAsync();
-
-                lock (_gate)
-                {
-                    _processing =
-                        false;
-                }
-
-                await SpeakTransientAsync(
-                    "I didn't catch that.",
-                    cancellationToken);
+                await CancelCurrentInteractionCoreAsync(
+                    "no-command-understood",
+                    workerExpected:
+                        true);
 
                 return;
             }
@@ -1253,10 +1377,17 @@ internal sealed class AssistantMode :
                 ThinkingSoundPlayer thinking =
                     ThinkingSoundPlayer.Start())
             {
+                using var hermesTimeout =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        cancellationToken);
+
+                hermesTimeout.CancelAfter(
+                    HermesRequestTimeout);
+
                 reply =
                     await _hermes.SendAsync(
                         command,
-                        cancellationToken);
+                        hermesTimeout.Token);
             }
 
             hermesWatch.Stop();
@@ -1305,23 +1436,35 @@ internal sealed class AssistantMode :
             RefreshLights();
         }
         catch (OperationCanceledException)
-            when (cancellationToken.IsCancellationRequested)
+            when (_runCancellationToken.IsCancellationRequested)
         {
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine(
+                "ASSISTANT -> interaction cancelled or timed out; returning to radio");
+
+            DiagnosticLog.Warning(
+                "assistant",
+                "interaction_cancelled",
+                new
+                {
+                    state =
+                        GetStatus().State
+                });
+
+            await CancelCurrentInteractionCoreAsync(
+                "operation-cancelled",
+                workerExpected:
+                    true);
         }
         catch (Exception ex)
         {
             lock (_gate)
             {
-                _processing =
-                    false;
-
                 _lastError =
                     ex.Message;
             }
-
-            await EndListeningDuckAsync();
-
-            RefreshLights();
 
             Console.Error.WriteLine(
                 $"ASSISTANT COMMAND ERROR -> {ex.Message}");
@@ -1337,6 +1480,16 @@ internal sealed class AssistantMode :
                     listen_duck_held =
                         _listenDuckHeld
                 });
+
+            await CancelCurrentInteractionCoreAsync(
+                "command-error",
+                workerExpected:
+                    true);
+        }
+        finally
+        {
+            CompleteInteraction(
+                interactionCancellation);
         }
     }
 
@@ -1417,9 +1570,37 @@ internal sealed class AssistantMode :
 
             TryShowActiveCall();
 
-            await NeuralTtsSpeaker.SpeakAsync(
-                text,
-                cancellationToken);
+            using var ttsTimeout =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken);
+
+            ttsTimeout.CancelAfter(
+                TtsRequestTimeout);
+
+            try
+            {
+                await NeuralTtsSpeaker.SpeakAsync(
+                    text,
+                    ttsTimeout.Token);
+            }
+            catch (OperationCanceledException)
+                when (
+                    !cancellationToken.IsCancellationRequested &&
+                    ttsTimeout.IsCancellationRequested)
+            {
+                Console.Error.WriteLine(
+                    $"TTS -> timed out after {TtsRequestTimeout.TotalSeconds:0} s; continuing without speech");
+
+                DiagnosticLog.Warning(
+                    "tts",
+                    "speak_timeout",
+                    new
+                    {
+                        timeout_ms =
+                            (long)
+                                TtsRequestTimeout.TotalMilliseconds
+                    });
+            }
         }
         finally
         {
@@ -1549,6 +1730,211 @@ internal sealed class AssistantMode :
         DiagnosticLog.Event(
             "audio",
             "echo_listen_duck_released");
+    }
+
+    private async Task WatchInteractionTimeoutAsync(
+        CancellationTokenSource interaction)
+    {
+        try
+        {
+            await Task.Delay(
+                InteractionWatchdogTimeout,
+                interaction.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        bool stillCurrent;
+
+        lock (_gate)
+        {
+            stillCurrent =
+                ReferenceEquals(
+                    _interactionCancellation,
+                    interaction);
+        }
+
+        if (!stillCurrent)
+        {
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"ASSISTANT -> interaction watchdog fired after {InteractionWatchdogTimeout.TotalSeconds:0} s");
+
+        DiagnosticLog.Warning(
+            "assistant",
+            "interaction_watchdog_timeout",
+            new
+            {
+                timeout_ms =
+                    (long)
+                        InteractionWatchdogTimeout.TotalMilliseconds,
+                state =
+                    GetStatus().State
+            });
+
+        await CancelCurrentInteractionAsync(
+            "watchdog-timeout");
+    }
+
+    private async Task<bool> CancelCurrentInteractionCoreAsync(
+        string reason,
+        bool? workerExpected)
+    {
+        CancellationTokenSource? cancellation;
+        bool wasBusy;
+        bool workerWillDispose;
+
+        lock (_gate)
+        {
+            wasBusy =
+                _listening ||
+                _processing ||
+                _speaking ||
+                _listenDuckHeld ||
+                _interactionCancellation is not null;
+
+            if (!wasBusy)
+            {
+                return false;
+            }
+
+            workerWillDispose =
+                workerExpected ??
+                (
+                    _processing ||
+                    _speaking
+                );
+
+            cancellation =
+                _interactionCancellation;
+
+            _interactionCancellation =
+                null;
+
+            _rolling.SetLength(
+                0);
+
+            _command.SetLength(
+                0);
+
+            _listening =
+                false;
+
+            _processing =
+                false;
+
+            _speaking =
+                false;
+
+            _probeBusy =
+                false;
+
+            _commandSpeechDetected =
+                false;
+
+            _lastIdleSpeech =
+                DateTimeOffset.MinValue;
+
+            _nextProbe =
+                DateTimeOffset.UtcNow +
+                ProbeInterval;
+        }
+
+        try
+        {
+            cancellation?.Cancel();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            await PhoneAudioSessionController.ReleaseMuteAsync(
+                "echo-tts",
+                CancellationToken.None);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            await RadioController.ReleasePauseAsync(
+                "echo-tts",
+                CancellationToken.None);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            await EndListeningDuckAsync();
+        }
+        catch
+        {
+        }
+
+        RefreshLights();
+
+        Console.WriteLine(
+            $"ASSISTANT -> interaction cleared ({reason})");
+
+        DiagnosticLog.Event(
+            "assistant",
+            "interaction_cleared",
+            new
+            {
+                reason,
+                worker_will_dispose =
+                    workerWillDispose
+            });
+
+        if (!workerWillDispose)
+        {
+            cancellation?.Dispose();
+        }
+
+        return true;
+    }
+
+    private void CompleteInteraction(
+        CancellationTokenSource? interaction)
+    {
+        if (interaction is null)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (ReferenceEquals(
+                _interactionCancellation,
+                interaction))
+            {
+                _interactionCancellation =
+                    null;
+            }
+        }
+
+        try
+        {
+            interaction.Cancel();
+        }
+        catch
+        {
+        }
+
+        interaction.Dispose();
     }
 
     private void TrimRollingLocked(
