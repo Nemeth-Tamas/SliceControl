@@ -26,11 +26,40 @@ $transcribeArgs = @(
     "--diarization-url", $DiarizationUrl
 )
 
-try {
-    & $exe @transcribeArgs >> $stdoutLog 2>> $stderrLog
-    exit $LASTEXITCODE
-}
-catch {
-    $_ | Out-String | Add-Content -Path $stderrLog
-    exit 1
+$restartCount = 0
+
+while ($true) {
+    $restartCount++
+
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    Add-Content -Path $stdoutLog -Value ("{0} WRAPPER -> starting SliceTranscribe (attempt {1})" -f $stamp, $restartCount)
+
+    $exitCode = 1
+
+    try {
+        # Windows PowerShell 5.1 turns native stderr into PowerShell error
+        # records. SliceTranscribe intentionally writes recoverable warnings
+        # (for example remote Whisper being unavailable) to stderr, so using
+        # ErrorActionPreference=Stop here can kill the appliance even though
+        # the application itself is handling the failure correctly.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+
+        try {
+            & $exe @transcribeArgs >> $stdoutLog 2>> $stderrLog
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousPreference
+        }
+    }
+    catch {
+        $_ | Out-String | Add-Content -Path $stderrLog
+        $exitCode = 1
+    }
+
+    $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    Add-Content -Path $stderrLog -Value ("{0} WRAPPER -> SliceTranscribe exited with code {1}; restarting in 2 s" -f $stamp, $exitCode)
+
+    Start-Sleep -Seconds 2
 }
