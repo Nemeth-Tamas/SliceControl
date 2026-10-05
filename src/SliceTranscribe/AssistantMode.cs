@@ -186,7 +186,8 @@ internal sealed class AssistantMode :
                 return
                     _listening ||
                     _processing ||
-                    _speaking;
+                    _speaking ||
+                    _interactionCancellation is not null;
             }
         }
     }
@@ -1581,7 +1582,9 @@ internal sealed class AssistantMode :
             {
                 await NeuralTtsSpeaker.SpeakAsync(
                     text,
-                    ttsTimeout.Token);
+                    ttsTimeout.Token)
+                    .WaitAsync(
+                        ttsTimeout.Token);
             }
             catch (OperationCanceledException)
                 when (
