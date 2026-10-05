@@ -21,8 +21,8 @@ internal static class NeuralTtsSpeaker
         new()
         {
             Timeout =
-                TimeSpan.FromMinutes(
-                    15)
+                TimeSpan.FromSeconds(
+                    60)
         };
 
     private static KokoroWavSynthesizer? _synthesizer;
@@ -64,11 +64,36 @@ internal static class NeuralTtsSpeaker
             return;
         }
 
+        if (!File.Exists(
+            ModelPath))
+        {
+            Console.Error.WriteLine(
+                "TTS -> Kokoro model is not installed yet; using Windows SAPI without waiting for download");
+
+            DiagnosticLog.Warning(
+                "tts",
+                "kokoro_model_missing_sapi_fallback");
+
+            await WindowsTtsSpeaker.SpeakAsync(
+                text,
+                cancellationToken);
+
+            return;
+        }
+
+        using var interactiveTimeout =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+
+        interactiveTimeout.CancelAfter(
+            TimeSpan.FromSeconds(
+                20));
+
         try
         {
             KokoroWavSynthesizer synthesizer =
                 await EnsureLoadedAsync(
-                    cancellationToken);
+                    interactiveTimeout.Token);
 
             KokoroVoice voice =
                 KokoroVoiceManager.GetVoice(
@@ -77,23 +102,44 @@ internal static class NeuralTtsSpeaker
             byte[] pcm =
                 await synthesizer.SynthesizeAsync(
                     text,
-                    voice);
+                    voice)
+                    .WaitAsync(
+                        interactiveTimeout.Token);
 
-            cancellationToken.ThrowIfCancellationRequested();
+            interactiveTimeout.Token.ThrowIfCancellationRequested();
 
             await PlayPcmAsync(
                 pcm,
-                cancellationToken);
+                interactiveTimeout.Token);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
+        catch (OperationCanceledException)
+            when (interactiveTimeout.IsCancellationRequested)
+        {
+            Console.Error.WriteLine(
+                "TTS -> Kokoro interactive timeout; falling back to Windows SAPI");
+
+            DiagnosticLog.Warning(
+                "tts",
+                "kokoro_interactive_timeout");
+
+            await WindowsTtsSpeaker.SpeakAsync(
+                text,
+                cancellationToken);
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine(
                 $"TTS -> Kokoro failed, falling back to Windows SAPI: {ex.Message}");
+
+            DiagnosticLog.Error(
+                "tts",
+                "kokoro_failed",
+                ex);
 
             await WindowsTtsSpeaker.SpeakAsync(
                 text,
