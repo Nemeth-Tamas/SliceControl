@@ -14,7 +14,7 @@ internal sealed class AudioActivityMonitor
         TimeSpan.FromMilliseconds(150);
 
     private readonly TimeSpan _resumeDelay =
-        TimeSpan.FromSeconds(2);
+        TimeSpan.FromSeconds(5);
 
     private readonly TimeSpan _sessionRefreshInterval =
         TimeSpan.FromSeconds(1);
