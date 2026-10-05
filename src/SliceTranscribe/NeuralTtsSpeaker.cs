@@ -102,9 +102,7 @@ internal static class NeuralTtsSpeaker
             byte[] pcm =
                 await synthesizer.SynthesizeAsync(
                     text,
-                    voice)
-                    .WaitAsync(
-                        interactiveTimeout.Token);
+                    voice);
 
             interactiveTimeout.Token.ThrowIfCancellationRequested();
 
