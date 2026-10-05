@@ -477,7 +477,7 @@ try
             "RED    = stop + finalize WAV/TXT");
 
         Console.WriteLine(
-            "RED idle = toggle quiet/night mode (master output mute)");
+            "RED idle = toggle quiet/night mode; RED while Echo is active = cancel Echo");
 
         Console.WriteLine(
             "Ctrl+C = quit");
@@ -493,6 +493,7 @@ try
         await RunButtonLoopAsync(
             slice,
             recording,
+            assistant,
             buttonEvents.Reader,
             cts.Token);
     }
@@ -735,6 +736,7 @@ static async Task PumpButtonsAsync(
 static async Task RunButtonLoopAsync(
     SliceDevice slice,
     RecordingCoordinator recording,
+    AssistantMode assistant,
     ChannelReader<SlicePhysicalButtonEvent> reader,
     CancellationToken cancellationToken)
 {
@@ -760,39 +762,53 @@ static async Task RunButtonLoopAsync(
                 break;
 
             case SlicePhysicalButton.Hangup:
-                if (!recording.IsRecording)
-                {
-                    bool quietMode =
-                        SystemAudioController.ToggleMute();
-
-                    Console.WriteLine(
-                        quietMode
-                            ? "QUIET MODE -> ON (master output muted)"
-                            : "QUIET MODE -> OFF (master output unmuted)");
-
-                    if (quietMode)
-                    {
-                        TryLightUpdate(
-                            () =>
-                                slice.Lights.SetMutedCall(
-                                    0),
-                            "quiet-mode indicator");
-
-                        await Task.Delay(
-                            500,
-                            cancellationToken);
-                    }
-
-                    TryLightUpdate(
-                        () =>
-                            slice.Lights.Reset(),
-                        "idle reset");
-                }
-                else
+                if (recording.IsRecording)
                 {
                     await recording.StopAsync(
                         cancellationToken);
+
+                    break;
                 }
+
+                if (assistant.IsBusy)
+                {
+                    bool cancelled =
+                        await assistant.CancelCurrentInteractionAsync(
+                            "red-button");
+
+                    Console.WriteLine(
+                        cancelled
+                            ? "ASSISTANT -> cancelled from RED button"
+                            : "ASSISTANT -> RED cancel requested, but assistant was already idle");
+
+                    break;
+                }
+
+                bool quietMode =
+                    SystemAudioController.ToggleMute();
+
+                Console.WriteLine(
+                    quietMode
+                        ? "QUIET MODE -> ON (master output muted)"
+                        : "QUIET MODE -> OFF (master output unmuted)");
+
+                if (quietMode)
+                {
+                    TryLightUpdate(
+                        () =>
+                            slice.Lights.SetMutedCall(
+                                0),
+                        "quiet-mode indicator");
+
+                    await Task.Delay(
+                        500,
+                        cancellationToken);
+                }
+
+                TryLightUpdate(
+                    () =>
+                        slice.Lights.Reset(),
+                    "idle reset");
 
                 break;
 
