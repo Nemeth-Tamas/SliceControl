@@ -23,6 +23,9 @@ internal static class RadioController
     private static string? _currentStation;
     private static string? _currentUrl;
 
+    private static bool _desiredPlayback =
+        true;
+
     private enum VlcPlaybackState
     {
         Unknown = 0,
@@ -44,6 +47,19 @@ internal static class RadioController
 
     public static string? CurrentUrl =>
         _currentUrl;
+
+    public static bool CanRecoverSilentPlayback
+    {
+        get
+        {
+            lock (PauseReasons)
+            {
+                return
+                    _desiredPlayback &&
+                    PauseReasons.Count == 0;
+            }
+        }
+    }
 
     public static async Task<string> PlayAsync(
         string presetOrUrl,
@@ -70,6 +86,9 @@ internal static class RadioController
 
         try
         {
+            _desiredPlayback =
+                true;
+
             await SendCommandAsync(
                 "clear",
                 cancellationToken);
@@ -146,6 +165,9 @@ internal static class RadioController
 
         try
         {
+            _desiredPlayback =
+                false;
+
             bool stopped =
                 await SendCommandAsync(
                     "stop",
@@ -240,6 +262,24 @@ internal static class RadioController
 
         try
         {
+            if (
+                !_desiredPlayback ||
+                PauseReasons.Count != 0)
+            {
+                DiagnosticLog.Event(
+                    "radio",
+                    "silent_playback_recovery_skipped",
+                    new
+                    {
+                        desired_playback =
+                            _desiredPlayback,
+                        pause_reasons =
+                            PauseReasons.ToArray()
+                    });
+
+                return;
+            }
+
             VlcPlaybackState state =
                 await QueryStateAsync(
                     cancellationToken);
