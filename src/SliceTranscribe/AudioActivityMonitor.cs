@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NAudio.CoreAudioApi;
 
 namespace SliceTranscribe;
@@ -18,6 +19,9 @@ internal sealed class AudioActivityMonitor
 
     private readonly TimeSpan _sessionRefreshInterval =
         TimeSpan.FromSeconds(1);
+
+    private readonly TimeSpan _radioSilenceRecoveryDelay =
+        TimeSpan.FromSeconds(20);
 
     public async Task RunAsync(
         CancellationToken cancellationToken)
@@ -45,6 +49,9 @@ internal sealed class AudioActivityMonitor
         bool startupAudioRecovered =
             false;
 
+        DateTimeOffset? radioSilentSince =
+            null;
+
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -66,6 +73,11 @@ internal sealed class AudioActivityMonitor
                         manager.Sessions,
                         out string? source,
                         out float peak);
+
+                bool radioActive =
+                    TryFindVlcAudio(
+                        manager.Sessions,
+                        out float radioPeak);
 
                 if (!startupAudioRecovered)
                 {
@@ -140,6 +152,48 @@ internal sealed class AudioActivityMonitor
                         });
                 }
 
+                if (!phoneActive)
+                {
+                    if (radioActive)
+                    {
+                        radioSilentSince =
+                            null;
+                    }
+                    else
+                    {
+                        radioSilentSince ??=
+                            now;
+
+                        if (
+                            now - radioSilentSince.Value >=
+                                _radioSilenceRecoveryDelay)
+                        {
+                            DiagnosticLog.Warning(
+                                "audio_activity",
+                                "radio_silent_timeout",
+                                new
+                                {
+                                    delay_ms =
+                                        (long)
+                                            _radioSilenceRecoveryDelay.TotalMilliseconds,
+                                    radio_peak =
+                                        radioPeak
+                                });
+
+                            await RadioController.RecoverSilentPlaybackAsync(
+                                cancellationToken);
+
+                            radioSilentSince =
+                                DateTimeOffset.UtcNow;
+                        }
+                    }
+                }
+                else
+                {
+                    radioSilentSince =
+                        null;
+                }
+
                 await Task.Delay(
                     _pollInterval,
                     cancellationToken);
@@ -165,6 +219,76 @@ internal sealed class AudioActivityMonitor
             }
 
         }
+    }
+
+    private static bool TryFindVlcAudio(
+        SessionCollection sessions,
+        out float peak)
+    {
+        peak =
+            0;
+
+        for (int i = 0;
+             i < sessions.Count;
+             i++)
+        {
+            try
+            {
+                using AudioSessionControl session =
+                    sessions[i];
+
+                uint processId =
+                    session.GetProcessID;
+
+                if (processId == 0)
+                {
+                    continue;
+                }
+
+                string processName;
+
+                try
+                {
+                    using Process process =
+                        Process.GetProcessById(
+                            checked((int)processId));
+
+                    processName =
+                        process.ProcessName;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!processName.Equals(
+                    "vlc",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                float sessionPeak =
+                    session.AudioMeterInformation.MasterPeakValue;
+
+                peak =
+                    Math.Max(
+                        peak,
+                        sessionPeak);
+
+                if (sessionPeak >=
+                    ActivityThreshold)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Sessions can disappear between enumeration and inspection.
+            }
+        }
+
+        return false;
     }
 
     private static bool TryFindPhoneA2dpAudio(
