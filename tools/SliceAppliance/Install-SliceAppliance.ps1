@@ -182,9 +182,18 @@ if (-not $NoStart) {
     Write-Host ("  Slice Retro Radio: {0} (LastTaskResult {1})" -f $radioState, $radioTask.LastTaskResult)
     Write-Host ("  Slice MCP: {0} (LastTaskResult {1})" -f $mcpState, $mcpTask.LastTaskResult)
 
-    Start-Sleep -Seconds 1
+    $mcpListener = $null
+    $mcpDeadline = (Get-Date).AddSeconds(15)
 
-    $mcpListener = Get-NetTCPConnection -LocalPort $mcpPort -State Listen -ErrorAction SilentlyContinue
+    while ((Get-Date) -lt $mcpDeadline) {
+        $mcpListener = Get-NetTCPConnection -LocalPort $mcpPort -State Listen -ErrorAction SilentlyContinue
+
+        if ($null -ne $mcpListener) {
+            break
+        }
+
+        Start-Sleep -Milliseconds 500
+    }
 
     if ($null -eq $mcpListener) {
         Write-Warning "Slice MCP is not listening on TCP $mcpPort."
