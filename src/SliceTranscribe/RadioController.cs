@@ -48,19 +48,6 @@ internal static class RadioController
     public static string? CurrentUrl =>
         _currentUrl;
 
-    public static bool CanRecoverSilentPlayback
-    {
-        get
-        {
-            lock (PauseReasons)
-            {
-                return
-                    _desiredPlayback &&
-                    PauseReasons.Count == 0;
-            }
-        }
-    }
-
     public static async Task<string> PlayAsync(
         string presetOrUrl,
         CancellationToken cancellationToken = default)
