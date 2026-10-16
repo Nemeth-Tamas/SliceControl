@@ -232,6 +232,81 @@ internal static class RadioController
         return state.ToString();
     }
 
+    public static async Task RecoverSilentPlaybackAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await Gate.WaitAsync(
+            cancellationToken);
+
+        try
+        {
+            VlcPlaybackState state =
+                await QueryStateAsync(
+                    cancellationToken);
+
+            DiagnosticLog.Warning(
+                "radio",
+                "silent_playback_recovery",
+                new
+                {
+                    state =
+                        state.ToString(),
+                    pause_reasons =
+                        PauseReasons.ToArray()
+                });
+
+            switch (state)
+            {
+                case VlcPlaybackState.Paused:
+                    await SendCommandAsync(
+                        "pause",
+                        cancellationToken);
+
+                    break;
+
+                case VlcPlaybackState.Playing:
+                    // VLC can remain "playing" while a network stream has
+                    // stopped producing audio. Reopen the current stream.
+                    await SendCommandAsync(
+                        "stop",
+                        cancellationToken);
+
+                    await Task.Delay(
+                        300,
+                        cancellationToken);
+
+                    await SendCommandAsync(
+                        "play",
+                        cancellationToken);
+
+                    break;
+
+                case VlcPlaybackState.Stopped:
+                case VlcPlaybackState.Unknown:
+                    await SendCommandAsync(
+                        "play",
+                        cancellationToken);
+
+                    break;
+            }
+
+            // Reapply our logical duck state after transport recovery because
+            // VLC may have created a fresh Core Audio session.
+            await Task.Delay(
+                500,
+                cancellationToken);
+
+            await SetRadioSessionMutedAsync(
+                muted:
+                    PauseReasons.Count != 0,
+                cancellationToken);
+        }
+        finally
+        {
+            Gate.Release();
+        }
+    }
+
     public static async Task<bool> RequestPauseAsync(
         string reason,
         CancellationToken cancellationToken = default)
