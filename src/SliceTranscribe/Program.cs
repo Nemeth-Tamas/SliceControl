@@ -403,7 +403,7 @@ try
                 cts.Token);
 
         Console.WriteLine(
-            "Audio priority: active iPhone A2DP media mutes Retro Radio; 2 s quiet unmutes it");
+            "Audio priority: active iPhone A2DP media mutes Retro Radio; 5 s quiet unmutes it");
 
         Console.WriteLine(
             phoneName is null
