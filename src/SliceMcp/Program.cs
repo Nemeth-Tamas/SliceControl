@@ -41,7 +41,8 @@ builder.Services.AddMcpServer()
             options.SessionMode =
                 HttpServerSessionMode.Stateless;
         })
-    .WithTools<ShopAudioTools>();
+    .WithTools<ShopAudioTools>()
+    .WithTools<EagleEyeTools>();
 
 var app =
     builder.Build();
