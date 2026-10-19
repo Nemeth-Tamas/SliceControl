@@ -601,3 +601,34 @@ stop it and retry the status call.
 MCP remains available on the existing trusted WireGuard transport. Treat
 camera movement as an authenticated-operator action at the ECHO client;
 the existing MCP HTTP endpoint itself does not add per-tool authentication.
+
+
+### ECHO camera vision: snapshot MCP tool
+
+`eagleeye_snapshot` captures one fresh frame from the EagleEye IV USB video device
+**attached directly to the Slice**, encodes it as a bounded JPEG, and returns a native
+MCP `image/jpeg` content block plus a text description. It does not contact the
+Raspberry Pi, save photographs, continuously stream, or perform face recognition.
+The camera is opened only for an explicit tool invocation and released afterward.
+If another app holds exclusive camera access, close that app and retry.
+
+Requires the `OpenCvSharp4.Windows` NuGet dependency, restored by the standard
+`Install-SliceAppliance.ps1` installer. Camera discovery uses DirectShow names,
+and video capture uses DirectShow device index; verify that the frame is genuinely
+from the EagleEye on multi-camera installations before relying on it.
+
+To deploy, open elevated PowerShell in the repository folder:
+
+```powershell
+git pull
+.\tools\SliceAppliance\Install-SliceAppliance.ps1
+```
+
+Ask ECHO: "Take one EagleEye snapshot and describe what you see."
+For motion + vision, first use `eagleeye_nudge`, then request a
+new `eagleeye_snapshot` after the motion settles.
+
+**Unverified until deployed on the Slice:** actual driver capture compatibility,
+DirectShow enumeration ordering, and MCP-client image support. MCP SDK 2.2.0
+has a reported image-block encoding issue in some clients; if images fail to
+decode, inspect MCP transport/library behavior, not just the camera driver.
