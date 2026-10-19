@@ -562,3 +562,42 @@ or the shorthand `--no-transcribe`.
 This is an experimental reverse-engineering project.
 
 See `protocol/README.md` for confirmed HID reports, observed LED behavior, and protocol notes.
+
+
+## EagleEye IV USB control via Slice MCP
+
+The existing Slice MCP server (WireGuard endpoint `http://10.10.10.12:8790/mcp`)
+now publishes three additional tools for ECHO:
+
+- `eagleeye_status`: inspect the Windows DirectShow camera filter, supported
+  hardware pan/tilt/zoom ranges, current settings and post-operation readback.
+- `eagleeye_nudge(axis, steps)`: move one axis (`pan`, `tilt`, `zoom`)
+  by -5 to +5 driver-reported hardware steps; requests are clamped to the
+  reported limits. For example `axis="pan", steps=1`.
+- `eagleeye_center`: request the middle of the driver-reported pan/tilt
+  ranges. This is **not** the camera's stored home preset.
+
+This uses Windows DirectShow `IAMCameraControl` **on the Slice itself**.
+It does **not** contact the Raspberry Pi, require browser PTZ, or send guessed
+vendor-specific USB commands. A supported axis must pass both `GetRange`
+and `Get` before a `Set` is attempted. Motion is serialized and each tool
+returns status or errors instead of assuming movement completed.
+
+Deployment on the Slice after pulling the latest commits:
+
+```powershell
+git pull
+dotnet publish .\src\SliceMcp\SliceMcp.csproj -c Release -r win-x64 --self-contained false
+```
+
+Restart the existing Slice MCP service / `Start-SliceMcp.ps1` launcher
+to load the published executable. Run `eagleeye_status` first, then one
+small `eagleeye_nudge` to verify that this EagleEye driver actually supports
+physical PTZ. Driver support is hardware-dependent and **not yet verified**
+on the connected Slice. If an axis is reported unsupported, no motor command
+is sent for that axis. If an application exclusively owns the USB device,
+stop it and retry the status call.
+
+MCP remains available on the existing trusted WireGuard transport. Treat
+camera movement as an authenticated-operator action at the ECHO client;
+the existing MCP HTTP endpoint itself does not add per-tool authentication.
