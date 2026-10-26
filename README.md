@@ -564,71 +564,13 @@ This is an experimental reverse-engineering project.
 See `protocol/README.md` for confirmed HID reports, observed LED behavior, and protocol notes.
 
 
-## EagleEye IV USB control via Slice MCP
+## EagleEye IV USB camera MCP
 
-The existing Slice MCP server (WireGuard endpoint `http://10.10.10.12:8790/mcp`)
-now publishes three additional tools for ECHO:
+The Slice MCP server exposes core `camera_*` tools for state, bounded relative
+nudges, absolute PTZ, zoom, home, centering on a target in an image, and fresh
+JPEG snapshots returned as native MCP image content. Existing `eagleeye_*`
+aliases remain supported.
 
-- `eagleeye_status`: inspect the Windows DirectShow camera filter, supported
-  hardware pan/tilt/zoom ranges, current settings and post-operation readback.
-- `eagleeye_nudge(axis, steps)`: move one axis (`pan`, `tilt`, `zoom`)
-  by -5 to +5 driver-reported hardware steps; requests are clamped to the
-  reported limits. For example `axis="pan", steps=1`.
-- `eagleeye_center`: request the middle of the driver-reported pan/tilt
-  ranges. This is **not** the camera's stored home preset.
-
-This uses Windows DirectShow `IAMCameraControl` **on the Slice itself**.
-It does **not** contact the Raspberry Pi, require browser PTZ, or send guessed
-vendor-specific USB commands. A supported axis must pass both `GetRange`
-and `Get` before a `Set` is attempted. Motion is serialized and each tool
-returns status or errors instead of assuming movement completed.
-
-Deployment on the Slice after pulling the latest commits:
-
-```powershell
-git pull
-dotnet publish .\src\SliceMcp\SliceMcp.csproj -c Release -r win-x64 --self-contained false
-```
-
-Restart the existing Slice MCP service / `Start-SliceMcp.ps1` launcher
-to load the published executable. Run `eagleeye_status` first, then one
-small `eagleeye_nudge` to verify that this EagleEye driver actually supports
-physical PTZ. Driver support is hardware-dependent and **not yet verified**
-on the connected Slice. If an axis is reported unsupported, no motor command
-is sent for that axis. If an application exclusively owns the USB device,
-stop it and retry the status call.
-
-MCP remains available on the existing trusted WireGuard transport. Treat
-camera movement as an authenticated-operator action at the ECHO client;
-the existing MCP HTTP endpoint itself does not add per-tool authentication.
-
-
-### ECHO camera vision: snapshot MCP tool
-
-`eagleeye_snapshot` captures one fresh frame from the EagleEye IV USB video device
-**attached directly to the Slice**, encodes it as a bounded JPEG, and returns a native
-MCP `image/jpeg` content block plus a text description. It does not contact the
-Raspberry Pi, save photographs, continuously stream, or perform face recognition.
-The camera is opened only for an explicit tool invocation and released afterward.
-If another app holds exclusive camera access, close that app and retry.
-
-Requires the `OpenCvSharp4.Windows` NuGet dependency, restored by the standard
-`Install-SliceAppliance.ps1` installer. Camera discovery uses DirectShow names,
-and video capture uses DirectShow device index; verify that the frame is genuinely
-from the EagleEye on multi-camera installations before relying on it.
-
-To deploy, open elevated PowerShell in the repository folder:
-
-```powershell
-git pull
-.\tools\SliceAppliance\Install-SliceAppliance.ps1
-```
-
-Ask ECHO: "Take one EagleEye snapshot and describe what you see."
-For motion + vision, first use `eagleeye_nudge`, then request a
-new `eagleeye_snapshot` after the motion settles.
-
-**Unverified until deployed on the Slice:** actual driver capture compatibility,
-DirectShow enumeration ordering, and MCP-client image support. MCP SDK 2.2.0
-has a reported image-block encoding issue in some clients; if images fail to
-decode, inspect MCP transport/library behavior, not just the camera driver.
+See [the camera tool guide](docs/EagleEye-MCP.md) for tool arguments, coordinate
+conventions, driver quirks, FOV calibration, validation and deployment. The
+endpoint remains `http://10.10.10.12:8790/mcp`.

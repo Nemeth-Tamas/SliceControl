@@ -6,18 +6,20 @@ using System.Net;
 const string bindAddress =
     "10.10.10.12";
 
-const int port =
-    8790;
-
 var builder =
     WebApplication.CreateBuilder(
         args);
+
+// Overrides allow isolated loopback validation without disturbing the appliance.
+int port = builder.Configuration.GetValue<int?>("Mcp:Port") ?? 8790;
+var listenAddress = IPAddress.Parse(builder.Configuration["Mcp:BindAddress"] ?? "0.0.0.0");
+builder.Services.AddSingleton<EagleEyeCamera>();
 
 builder.WebHost.ConfigureKestrel(
     options =>
     {
         options.Listen(
-            IPAddress.Any,
+            listenAddress,
             port);
     });
 
